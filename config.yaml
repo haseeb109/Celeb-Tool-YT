@@ -34,7 +34,7 @@ script:
   qa_max_rounds: 3
 
 voice:
-  provider: elevenlabs
+  provider: elevenlabs      # elevenlabs | ai33   (GUI Settings se bhi badal sakte ho)
   voice: ""                 # voice ka NAAM (jaise "Dark Narrator") ya voice_id. UI se bhi select hota hai.
   model_id: eleven_multilingual_v2
   stability: 0.45

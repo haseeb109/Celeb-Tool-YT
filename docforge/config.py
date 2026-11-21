@@ -14,7 +14,7 @@ def load_env():
             line = line.strip()
             if line and not line.startswith("#") and "=" in line:
                 k, v = line.split("=", 1)
-                os.environ.setdefault(k.strip(), v.strip().strip('"').strip("'"))
+                os.environ[k.strip()] = v.strip().strip('"').strip("'")
 
 
 LOCAL = ROOT / "settings.local.yaml"   # GUI ki settings (git mein nahi jati)
@@ -47,7 +47,7 @@ def save_local(updates: dict):
     LOCAL.write_text(yaml.safe_dump(cur, sort_keys=False, allow_unicode=True))
 
 
-def save_keys(deploy=None, eleven=None):
+def save_keys(deploy=None, eleven=None, ai33=None):
     vals = {}
     if ENV.exists():
         for line in ENV.read_text().splitlines():
@@ -60,6 +60,9 @@ def save_keys(deploy=None, eleven=None):
     if eleven:
         vals["ELEVENLABS_API_KEY"] = eleven.strip()
         os.environ["ELEVENLABS_API_KEY"] = eleven.strip()
+    if ai33:
+        vals["AI33_API_KEY"] = ai33.strip()
+        os.environ["AI33_API_KEY"] = ai33.strip()
     ENV.write_text("".join(f"{k}={v}\n" for k, v in vals.items()))
     try:
         ENV.chmod(0o600)

@@ -22,10 +22,12 @@ CSS = """
 
 
 # ------------------------------------------------------------------ helpers
-def voices():
+def voices(provider=None):
     try:
-        from docforge.tts import list_voices
-        return [f"{n}  ::  {v}" for n, v, _ in list_voices()]
+        from docforge import tts
+        if provider:
+            tts.PROVIDER["name"] = provider
+        return [f"{n}  ::  {v}" for n, v, _ in tts.list_voices()]
     except Exception as e:
         return [f"(error: {str(e)[:80]})"]
 
@@ -142,34 +144,48 @@ def load_output(job):
 
 
 # keys
-def keys_save(dk, ek):
-    save_keys(dk or None, ek or None)
-    return "✔ Keys save ho gayin (.env, sirf aapke Mac par)", mask("DEPLOY_API_KEY"), mask("ELEVENLABS_API_KEY"), "", ""
+def keys_save(dk, ek, ak):
+    save_keys(dk or None, ek or None, ak or None)
+    return ("✔ Keys save ho gayin (.env, sirf aapke Mac par)", mask("DEPLOY_API_KEY"), mask("ELEVENLABS_API_KEY"),
+            mask("AI33_API_KEY"), "", "", "")
 
 
-def test_deploy():
-    try:
-        from docforge.llm import LLM
-        cfg = load_config()
-        r = LLM(cfg).client.chat.completions.create(model=cfg["llm"]["writer_model"], max_tokens=5,
-                                                   messages=[{"role": "user", "content": "say ok"}],
-                                                   extra_body={"reasoning_effort": "none"})
-        return f"✔ Deploy API chal rahi hai ({cfg['llm']['writer_model']})"
-    except Exception as e:
-        return f"✖ Deploy: {str(e)[:200]}"
+def test_deploy(dk):
+    from docforge.llm import diagnose_deploy
+    if dk:
+        save_keys(dk, None, None)
+    report, base = diagnose_deploy(load_config())
+    if base:
+        save_local({"llm": {"base_url": base}})
+        report += f"\n\n✔ Deploy chal raha hai. Base URL lock: {base}"
+    else:
+        report += "\n\n✖ Koi URL kaam nahi kiya — upar har line ka status code aur wajah dekho."
+    return f"```\n{report}\n```", mask("DEPLOY_API_KEY")
 
 
-def test_eleven():
-    v = voices()
-    return f"✔ ElevenLabs chal rahi hai: {len(v)} voices" if v and not v[0].startswith("(error") else f"✖ {v[0] if v else 'no voices'}"
+def test_voice(provider, key):
+    env = "AI33_API_KEY" if provider == "ai33" else "ELEVENLABS_API_KEY"
+    if key:
+        save_keys(None, key if provider == "elevenlabs" else None, key if provider == "ai33" else None)
+    v = voices(provider)
+    ok = v and not v[0].startswith("(error")
+    return f"✔ {provider} chal raha hai: {len(v)} voices" if ok else f"✖ {provider}: {v[0] if v else 'no voices'}", mask(env)
+
+
+def do_update():
+    from docforge.updater import restart_soon, update
+    changed, log = update()
+    if changed:
+        restart_soon()
+    return f"```\n{log}\n```" + ("\n\n**Page 5 second baad refresh kar lena.**" if changed else "")
 
 
 # settings
-def settings_save(writer, auditor, w_eff, a_eff, voice, model_id, speed, quality, subs, crop_t, crop_b,
+def settings_save(provider, writer, auditor, w_eff, a_eff, voice, model_id, speed, quality, subs, crop_t, crop_b,
                   grade, cards, tag, mvol, duck):
     save_local({
         "llm": {"writer_model": writer, "auditor_model": auditor, "writer_reasoning": w_eff, "auditor_reasoning": a_eff},
-        "voice": {"voice": _vid(voice) or "", "model_id": model_id, "speed": float(speed)},
+        "voice": {"provider": provider, "voice": _vid(voice) or "", "model_id": model_id, "speed": float(speed)},
         "video": {"quality": quality, "subtitles": bool(subs), "broll_crop": {"top": int(crop_t), "bottom": int(crop_b), "left": 0, "right": 0},
                   "broll_grade": bool(grade), "label_cards": bool(cards), "clip_tag": "ORIGINAL CLIP" if tag else ""},
         "music": {"volume_db": int(mvol), "duck": bool(duck)},
@@ -211,7 +227,10 @@ THEME = gr.themes.Base(primary_hue="red", neutral_hue="zinc")
 GR6 = int(gr.__version__.split(".")[0]) >= 6
 STYLE = {"css": CSS, "theme": THEME}
 with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
-    gr.Markdown("# 🎬 Celeb Tool YT\nDark documentary pipeline · master prompt locked · DeepSeek + ElevenLabs + FFmpeg", elem_id="title")
+    with gr.Row():
+        gr.Markdown("# 🎬 Celeb Tool YT\nDark documentary pipeline · master prompt locked", elem_id="title")
+        upd = gr.Button("⬆ Update tool", scale=0, size="sm")
+    upd_msg = gr.Markdown()
 
     with gr.Tab("➕ New Job"):
         name = gr.Textbox(label="Job name (optional)", placeholder="jaise: drake-vs-kendrick")
@@ -219,17 +238,25 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
             with gr.Column():
                 gr.Markdown("### Video 1")
                 l1 = gr.Textbox(label="YouTube link", placeholder="https://www.youtube.com/watch?v=...")
-                t1 = gr.Textbox(label="Transcript 1 (timestamps ke saath)", lines=12, placeholder="[00:00:05] text...")
-                f1 = gr.File(label="…ya .txt / .srt upload", file_types=[".txt", ".srt", ".vtt"], type="filepath")
+                gr.Markdown("**Transcript 1** (timestamps ke saath) — paste karo YA upload")
+                with gr.Tabs():
+                    with gr.Tab("📋 Paste"):
+                        t1 = gr.Textbox(show_label=False, lines=14, max_lines=40, placeholder="Yahan transcript paste karo (Cmd+V)\n[00:00:05] text...\n[00:00:09] text...")
+                    with gr.Tab("📁 Upload"):
+                        f1 = gr.File(show_label=False, file_types=[".txt", ".srt", ".vtt"], type="filepath")
             with gr.Column():
                 gr.Markdown("### Video 2")
                 l2 = gr.Textbox(label="YouTube link", placeholder="https://www.youtube.com/watch?v=...")
-                t2 = gr.Textbox(label="Transcript 2 (timestamps ke saath)", lines=12, placeholder="[00:00:05] text...")
-                f2 = gr.File(label="…ya .txt / .srt upload", file_types=[".txt", ".srt", ".vtt"], type="filepath")
+                gr.Markdown("**Transcript 2** (timestamps ke saath) — paste karo YA upload")
+                with gr.Tabs():
+                    with gr.Tab("📋 Paste"):
+                        t2 = gr.Textbox(show_label=False, lines=14, max_lines=40, placeholder="Yahan transcript paste karo (Cmd+V)\n[00:00:05] text...\n[00:00:09] text...")
+                    with gr.Tab("📁 Upload"):
+                        f2 = gr.File(show_label=False, file_types=[".txt", ".srt", ".vtt"], type="filepath")
         rumor = gr.Textbox(label="🔥 Main rumor / idea (1 line), poori video isi ke gird", lines=2)
         with gr.Row():
             quality = gr.Radio(["1080p", "4k"], value=cfg["video"]["quality"], label="Quality")
-            voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="ElevenLabs voice (khaali = Settings wali)", allow_custom_value=True, scale=2)
+            voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="Voice (khaali = Settings wali)", allow_custom_value=True, scale=2)
             vref = gr.Button("↻ Voices load", scale=0)
             subs = gr.Checkbox(label="Subtitles", value=cfg["video"]["subtitles"])
         add = gr.Button("➕ Add to Queue", variant="primary", size="lg")
@@ -274,12 +301,17 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
                 gr.Markdown("### Deploy.com (DeepSeek / GLM)")
                 dstat = gr.Markdown(mask("DEPLOY_API_KEY"))
                 dkey = gr.Textbox(label="DEPLOY_API_KEY", type="password", placeholder="naya key paste karo")
-                dtest = gr.Button("Test Deploy")
+                dtest = gr.Button("Test Deploy (saare URLs check karta hai)")
             with gr.Column():
                 gr.Markdown("### ElevenLabs")
                 estat = gr.Markdown(mask("ELEVENLABS_API_KEY"))
                 ekey = gr.Textbox(label="ELEVENLABS_API_KEY", type="password", placeholder="naya key paste karo")
                 etest = gr.Button("Test ElevenLabs")
+            with gr.Column():
+                gr.Markdown("### AI33 Pro")
+                astat = gr.Markdown(mask("AI33_API_KEY"))
+                akey = gr.Textbox(label="AI33_API_KEY", type="password", placeholder="naya key paste karo")
+                atest = gr.Button("Test AI33 Pro")
         ksave = gr.Button("💾 Save keys", variant="primary")
         kmsg = gr.Markdown()
 
@@ -293,6 +325,7 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
                 s_aeff = gr.Dropdown(["low", "high", "max"], value=cfg["llm"]["auditor_reasoning"], label="Auditor reasoning")
             with gr.Column():
                 gr.Markdown("### Voice")
+                s_prov = gr.Radio(["elevenlabs", "ai33"], value=cfg["voice"].get("provider", "elevenlabs"), label="Voice provider")
                 s_voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="Default voice", allow_custom_value=True)
                 s_vref = gr.Button("↻ Voices load")
                 s_model = gr.Textbox(cfg["voice"]["model_id"], label="ElevenLabs model")
@@ -324,18 +357,21 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
         gr.Markdown("🔒 Master prompt ke rules locked hain. Ye settings unhein nahi badal sakti.")
 
     # wiring
-    for btn, dd in ((vref, voice), (qref, qvoice), (s_vref, s_voice)):
-        btn.click(lambda: gr.Dropdown(choices=voices()), None, dd)
+    for btn, dd in ((vref, voice), (qref, qvoice)):
+        btn.click(lambda: gr.Dropdown(choices=voices(load_config()["voice"].get("provider"))), None, dd)
+    s_vref.click(lambda p: gr.Dropdown(choices=voices(p)), s_prov, s_voice)
+    upd.click(do_update, None, upd_msg)
     add.click(add_job, [name, l1, t1, f1, l2, t2, f2, rumor, quality, voice, subs], [add_msg, grid])
     go.click(start_queue, qvoice, qmsg)
     rbtn.click(rerun, [rjob, rstage, qvoice], qmsg)
     dbtn.click(delete_job, rjob, [qmsg, grid])
     oref.click(lambda: gr.Dropdown(choices=job_names()), None, ojob)
     ojob.change(load_output, ojob, [ovid, oscript, olog, oqa, opk, ofiles])
-    ksave.click(keys_save, [dkey, ekey], [kmsg, dstat, estat, dkey, ekey])
-    dtest.click(test_deploy, None, kmsg)
-    etest.click(test_eleven, None, kmsg)
-    ssave.click(settings_save, [s_writer, s_aud, s_weff, s_aeff, s_voice, s_model, s_speed, s_q, s_subs, s_ct, s_cb,
+    ksave.click(keys_save, [dkey, ekey, akey], [kmsg, dstat, estat, astat, dkey, ekey, akey])
+    dtest.click(test_deploy, dkey, [kmsg, dstat])
+    etest.click(lambda k: test_voice("elevenlabs", k), ekey, [kmsg, estat])
+    atest.click(lambda k: test_voice("ai33", k), akey, [kmsg, astat])
+    ssave.click(settings_save, [s_prov, s_writer, s_aud, s_weff, s_aeff, s_voice, s_model, s_speed, s_q, s_subs, s_ct, s_cb,
                                 s_grade, s_cards, s_tag, s_mvol, s_duck], smsg)
     m_up.upload(music_add, m_up, m_tbl)
     m_clr.click(music_clear, None, m_tbl)

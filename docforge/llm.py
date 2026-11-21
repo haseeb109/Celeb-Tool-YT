@@ -10,7 +10,7 @@ from openai import OpenAI
 class LLM:
     def __init__(self, cfg, log=print):
         c = cfg["llm"]
-        key = os.environ.get("DEPLOY_API_KEY")
+        key = (os.environ.get("DEPLOY_API_KEY") or "").strip().removeprefix("Bearer ").strip()
         if not key:
             raise RuntimeError("DEPLOY_API_KEY .env mein nahi mili")
         self.client = OpenAI(base_url=c["base_url"], api_key=key, timeout=c["timeout_s"])
@@ -59,3 +59,35 @@ def parse_json(raw):
     if start < 0 or end < 0:
         raise ValueError("no JSON object in response")
     return json.loads(raw[start:end + 1])
+
+
+DEPLOY_BASES = ["https://api.deploy.com/api/v1", "https://api-sf1.deploy.com/api/v1", "https://api-va1.deploy.com/api/v1"]
+
+
+def diagnose_deploy(cfg):
+    """Raw HTTP test of every Deploy base URL × both models. Returns (report_text, working_base or None)."""
+    import requests
+    key = (os.environ.get("DEPLOY_API_KEY") or "").strip().removeprefix("Bearer ").strip()
+    if not key:
+        return "✖ DEPLOY_API_KEY save nahi hai", None
+    lines, working = [f"key: {key[:4]}…{key[-4:]} ({len(key)} chars)"], None
+    bases = [cfg["llm"]["base_url"]] + [b for b in DEPLOY_BASES if b != cfg["llm"]["base_url"]]
+    for base in bases:
+        for model in (cfg["llm"]["writer_model"], cfg["llm"]["auditor_model"]):
+            try:
+                r = requests.post(f"{base}/chat/completions", timeout=60,
+                                  headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+                                  json={"model": model, "messages": [{"role": "user", "content": "say ok"}],
+                                        "max_completion_tokens": 20, "reasoning_effort": "low"})
+                ok = r.status_code == 200
+                hint = {401: "key galat/expired ya ye key is API ki nahi", 405: "account balance khatam (credits daalo)",
+                        400: "request format / model naam", 429: "rate limit", 404: "URL ya model naam galat"}.get(r.status_code, "")
+                lines.append(f"{'✔' if ok else '✖'} {r.status_code} {base} · {model}" + (f" — {hint}" if hint and not ok else "")
+                             + ("" if ok else f"\n     {r.text[:160]}"))
+                if ok and not working:
+                    working = base
+            except Exception as e:
+                lines.append(f"✖ {base} · {model} — {type(e).__name__}: {str(e)[:120]}")
+        if working:
+            break
+    return "\n".join(lines), working

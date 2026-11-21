@@ -11,12 +11,18 @@ Output: 17–20 min ki final video (1080p/4K) + script + clip log + stems + titl
 cd docforge
 git clone https://github.com/haseeb109/Celeb-Tool-YT.git && cd Celeb-Tool-YT
 ./install.sh            # Homebrew, ffmpeg, yt-dlp, uv, Python env, mlx-whisper
-.venv/bin/python app.py # GUI khulega
 ```
+Install ke baad **naya Terminal** kholo aur sirf likho:
+```bash
+celeb
+```
+Is se menu aata hai: 1) Open tool, 2) Update, 3) Update + Open, 4) Bulk queue bina GUI, 5) Doctor.
+Seedha bhi chala sakte ho: `celeb open`, `celeb update`, ya Finder mein **Celeb Tool.command** par double-click.
+GUI mein upar right par **⬆ Update tool** button hai: ek click mein update hota hai aur tool khud restart ho jata hai.
 
 GUI mein:
-1. **🔑 API Keys** tab: Deploy aur ElevenLabs keys paste karo, Save karo, phir Test karo. Keys sirf aapke Mac par `.env` mein rehti hain, GitHub par nahi jati.
-2. **⚙️ Settings** tab: default voice, quality aur music upload (ek dafa). "Run doctor" se sab check ho jata hai.
+1. **🔑 API Keys** tab: Deploy aur ElevenLabs / AI33 Pro keys paste karo, Save karo, phir Test karo. Keys sirf aapke Mac par `.env` mein rehti hain, GitHub par nahi jati.
+2. **⚙️ Settings** tab: voice provider (ElevenLabs ya AI33 Pro), default voice, quality aur music upload (ek dafa). "Run doctor" se sab check ho jata hai.
 3. **➕ New Job**: links, transcripts aur rumor daal kar Add to Queue karo.
 4. **⏳ Queue**: Run Queue dabao. Har job ke stages live dikhte hain.
 5. **🎞 Outputs**: video, script, clip log, QA report aur titles sab yahin dikhte hain.

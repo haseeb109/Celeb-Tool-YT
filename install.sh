@@ -37,6 +37,9 @@ done
 uv pip install --python .venv/bin/python mlx-whisper || echo "⚠ mlx-whisper install nahi hua (optional) — baad mein: uv pip install --python .venv/bin/python mlx-whisper"
 [ -f .env ] || { cp .env.example .env; echo "→ .env bana di, apni keys daal do"; }
 mkdir -p assets/music assets/fonts jobs output
+# Terminal command:  celeb
+LINE="alias celeb='$(pwd)/start.sh'"
+grep -q "alias celeb=" ~/.zshrc 2>/dev/null || { echo "$LINE" >> ~/.zshrc; echo "✔ 'celeb' command add (naya terminal kholo)"; }
 say "Check"
 .venv/bin/python run.py doctor || true
-echo -e "\nUI:   .venv/bin/python app.py\nCLI:  .venv/bin/python run.py run"
+echo -e "\nAb naya Terminal kholo aur likho:  celeb"

@@ -242,6 +242,7 @@ def stage_clips(job, cfg, ts, llm, **_):
 
 def stage_voice(job, cfg, ts, llm, voice_override=None, **_):
     script = job.j("script.json")
+    tts.PROVIDER["name"] = cfg["voice"].get("provider", "elevenlabs")
     vname = voice_override or job.spec.get("voice") or cfg["voice"]["voice"]
     vid = tts.resolve_voice(vname)
     job.log(f"   voice: {vname} → {vid}")
