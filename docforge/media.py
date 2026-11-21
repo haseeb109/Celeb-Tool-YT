@@ -131,7 +131,7 @@ def _shot_chain(n, src_i, d, fx, cfg, W, H, cw, ch, c):
         f += ",fade=t=in:st=0:d=0.18:color=white"
     elif tr == "dip_to_black":
         f += ",fade=t=in:st=0:d=0.3:color=black"
-    return f + f",format=yuv420p[s{n}]"
+    return f + f",scale={W}:{H},setsar=1,format=yuv420p[s{n}]"  # zoom ke baad SAR/size normalize (concat ke liye)
 
 
 def finish_chain(look, W, H):
