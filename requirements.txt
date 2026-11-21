@@ -9,4 +9,3 @@ yt-dlp
 scenedetect[opencv-headless]
 numpy
 ocrmac; platform_system == "Darwin"
-mlx-whisper; platform_system == "Darwin" and platform_machine == "arm64"

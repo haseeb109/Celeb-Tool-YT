@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # DocForge installer — macOS (Apple Silicon). Jo pehle se installed hai usay skip karta hai.
 set -e
+set -o pipefail
 cd "$(dirname "$0")"
 say(){ printf "\n\033[1;31m▶ %s\033[0m\n" "$1"; }
 
@@ -24,8 +25,16 @@ if command -v ollama >/dev/null; then
 fi
 
 say "Python env (.venv)"
-uv venv --python 3.12 .venv
-uv pip install --python .venv/bin/python -r requirements.txt
+[ -x .venv/bin/python ] || uv venv --python 3.12 .venv
+export UV_HTTP_TIMEOUT=300
+# Core packages — inke baghair tool nahi chalta. Network toote to 3 dafa retry.
+for i in 1 2 3; do
+  uv pip install --python .venv/bin/python -r requirements.txt && break
+  echo "⚠ download fail (internet?) — retry $i/3 in 10s"; sleep 10
+  [ $i = 3 ] && { echo "✖ Core install fail. Internet check karke ./install.sh dobara chalao."; exit 1; }
+done
+# Optional: mlx-whisper (clip edges word-level precise; torch ~ bara download). Fail ho to tool phir bhi chalta hai.
+uv pip install --python .venv/bin/python mlx-whisper || echo "⚠ mlx-whisper install nahi hua (optional) — baad mein: uv pip install --python .venv/bin/python mlx-whisper"
 [ -f .env ] || { cp .env.example .env; echo "→ .env bana di, apni keys daal do"; }
 mkdir -p assets/music assets/fonts jobs output
 say "Check"
