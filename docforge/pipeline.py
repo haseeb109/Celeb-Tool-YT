@@ -251,6 +251,12 @@ def stage_voice(job, cfg, ts, llm, voice_override=None, **_):
     tts.PROVIDER["name"] = tts.effective_provider(cfg)
     job.log(f"   voice provider: {tts.PROVIDER['name']}")
     vname = voice_override or job.spec.get("voice") or cfg["voice"]["voice"]
+    if not vname:  # koi voice select nahi → account ki pehli voice
+        vs = tts.list_voices()
+        if not vs:
+            raise RuntimeError("Account mein koi voice nahi mili — Settings → Voices load se voice chuno ya voice_id paste karo")
+        vname = vs[0][1]
+        job.log(f"   ⚠ voice select nahi thi → pehli voice use: {vs[0][0]} ({vname}). Badalni ho: Settings → Default voice")
     vid = tts.resolve_voice(vname)
     job.log(f"   voice: {vname} → {vid}")
     d = job.work / "voice"
