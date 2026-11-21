@@ -1,0 +1,65 @@
+# DocForge — config. API keys .env file mein jaati hain, yahan nahi.
+
+master_prompt:
+  path: prompts/master_prompt.txt
+  # Master prompt ka fingerprint. File mein ek character bhi badla to pipeline ruk jayegi.
+  # Jaan boojh kar prompt badla hai to:  python run.py relock
+  sha256: 44882a70a2774ff8fe6c0ff2b11ae9818f243cb43b57ea3219a676d5204a880d
+
+llm:
+  base_url: https://api.deploy.com/api/v1          # OpenAI-compatible (docs.deploy.com/quickstart)
+  writer_model: deepseek-ai/deepseek-v4.1-flash-1017  # plan + script likhta hai
+  writer_reasoning: high                            # none | low | high | max
+  auditor_model: zai-org/glm-5.3-flash              # Phase 2 cross-check (dusra model = independent audit)
+  auditor_reasoning: high                           # low | high | max
+  temperature: 0.8
+  max_completion_tokens: 16000
+  timeout_s: 600
+  retries: 4
+
+script:
+  min_words: 2300          # master prompt section 5
+  max_words: 2900
+  target_words: 2600
+  words_per_second: 2.4    # sirf estimate ke liye; asal timings TTS ke baad nikalti hain
+  montage_clips: [2, 4]
+  montage_seconds: [30, 45]
+  # Master prompt mein contradiction: montage clips "3–8s", baaki callouts "5–10s".
+  # Dono rules alag alag apply honge:
+  montage_clip_seconds: [3, 8]
+  body_clip_seconds: [5, 10]
+  # Exact ranges, koi tolerance nahi (master prompt Sec 3: 3–8s, Sec 4: 5–10s).
+  clip_tolerance_seconds: 0
+  runtime_minutes: [17, 20]   # master prompt section 5 — TTS ke baad asal runtime check
+  qa_max_rounds: 3
+
+voice:
+  provider: elevenlabs
+  voice: ""                 # voice ka NAAM (jaise "Dark Narrator") ya voice_id. UI se bhi select hota hai.
+  model_id: eleven_multilingual_v2
+  stability: 0.45
+  similarity_boost: 0.8
+  style: 0.35
+  speed: 1.0
+
+video:
+  quality: 1080p            # 1080p | 4k   (job.yaml mein override ho sakta hai)
+  fps: 30
+  encoder: auto             # auto = Mac par h264_videotoolbox, warna libx264
+  subtitles: false          # optional burned-in subtitles
+  # Competitor videos mein burned subtitles / logo hon to b-roll se crop kar do (percent)
+  broll_crop: {top: 0, bottom: 12, left: 0, right: 0}
+  broll_grade: false        # dark documentary grade (desaturate + contrast + vignette)
+  clip_tag: ""              # off (master prompt mein nahi). On karna ho to "ORIGINAL CLIP"
+  label_cards: false        # off (master prompt mein nahi). On karna ho to true
+  # Overlays abhi Pillow se bante hain (tez, Node ki zaroorat nahi). HyperFrames animated cards = phase 2.
+
+music:
+  folder: assets/music      # ek dafa yahan mp3/wav daal do, har video mein yahi use hogi
+  volume_db: -20
+  duck: true                # voice/clip ke neeche music khud dabta hai
+
+paths:
+  jobs: jobs
+  output: output
+  fonts: assets/fonts

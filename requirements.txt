@@ -1,0 +1,9 @@
+openai>=1.40
+requests
+pyyaml
+rapidfuzz
+pillow
+python-docx
+gradio>=5.0
+yt-dlp
+mlx-whisper; platform_system == "Darwin" and platform_machine == "arm64"

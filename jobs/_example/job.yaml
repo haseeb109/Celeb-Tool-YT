@@ -1,0 +1,9 @@
+# Example (folder ka naam "_" se shuru hai isliye queue ise ignore karti hai).
+# Nayi job: is folder ko copy karo, naam badlo (jaise jobs/drake-feud), aur ye 3 cheezein bharo.
+link1: https://www.youtube.com/watch?v=XXXXXXXXXXX
+link2: https://www.youtube.com/watch?v=YYYYYYYYYYY
+rumor: "One line: your main rumor / idea"
+# optional overrides:
+# quality: 4k
+# voice: "Dark Narrator"     # ElevenLabs voice name ya id
+# subtitles: true
