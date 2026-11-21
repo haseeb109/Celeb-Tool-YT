@@ -156,24 +156,43 @@ def text_stats(cap, shots, work: Path):
             caps.append(sum(ch.isupper() for ch in txt) / max(1, sum(ch.isalpha() for ch in txt)))
             H, W = f.shape[:2]
             crop = f[int((1 - y - h) * H):int((1 - y) * H), int(x * W):int((x + w) * W)]
-            if crop.size:
-                px = crop.reshape(-1, 3)
-                bright = px[px.sum(axis=1) > np.percentile(px.sum(axis=1), 85)]
-                colors.append(np.median(bright, axis=0)[::-1].tolist())  # BGR→RGB
+            if crop.size >= 30:
+                px = crop.reshape(-1, 3).astype(np.float32)
+                bright = px[px.sum(axis=1) >= np.percentile(px.sum(axis=1), 85)]
+                if len(bright):
+                    c = np.median(bright, axis=0)[::-1]  # BGR→RGB
+                    if np.all(np.isfinite(c)):
+                        colors.append(c.tolist())
     if not frames:
         return None
     pos = "center" if not ys else ("top" if np.median(ys) < 0.33 else "bottom" if np.median(ys) > 0.66 else "center")
     return {"overlay_rate": hits / frames, "position": pos, "height_ratio": float(np.median(sizes)) if sizes else 0.05,
             "caps_ratio": float(np.median(caps)) if caps else 1.0,
-            "color_rgb": [int(c) for c in np.median(colors, axis=0)] if colors else [255, 255, 255]}
+            "color_rgb": _safe_rgb(colors)}
+
+
+def _safe_rgb(colors):
+    if not colors:
+        return [255, 255, 255]
+    m = np.nanmedian(np.array(colors, dtype=np.float32), axis=0)
+    return [int(x) if np.isfinite(x) else 255 for x in m]
+
+
+def _try(log, what, fn, default):
+    """Ek analysis step fail ho to poora analysis na ruke."""
+    try:
+        return fn()
+    except Exception as e:
+        _log(log, f"   ⚠ {what} skip ({type(e).__name__}: {str(e)[:120]})")
+        return default
 
 
 # ------------------------------------------------------------------ optional local vision model
 def vision_notes(cap, times, model, log=None):
     import requests
     imgs = []
-    for t in times[:8]:
-        f = _frame_at(cap, t, 768)
+    for t in times[:4]:
+        f = _frame_at(cap, t, 512)
         if f is not None:
             imgs.append(base64.b64encode(cv2.imencode(".jpg", f)[1]).decode())
     prompt = ("These are frames from one YouTube documentary. Describe ONLY the editing/visual style, as JSON: "
@@ -181,12 +200,19 @@ def vision_notes(cap, times, model, log=None):
               '"picture-in-picture","freeze frame","split screen", ...only those you see], '
               '"text_style": "how on-screen text looks", "framing": "how footage is framed", "mood": "3 words"}')
     try:
-        r = requests.post("http://127.0.0.1:11434/api/generate", timeout=600, json={
-            "model": model, "prompt": prompt, "images": imgs, "stream": False, "format": "json"})
-        return json.loads(r.json()["response"])
+        r = requests.post("http://127.0.0.1:11434/api/generate", timeout=900, json={
+            "model": model, "prompt": prompt, "images": imgs, "stream": False, "format": "json",
+            "options": {"num_ctx": 4096}})
+        j = r.json()
+        if "response" not in j:
+            _log(log, f"   vision model skip — Ollama error: {str(j.get('error', j))[:200]}")
+            return None
+        return json.loads(j["response"])
+    except requests.exceptions.ConnectionError:
+        _log(log, "   vision model skip — Ollama band hai. Terminal: `brew services start ollama`")
     except Exception as e:
-        _log(log, f"   vision model skip ({type(e).__name__}) — Ollama chal raha hai? `ollama pull {model}`")
-        return None
+        _log(log, f"   vision model skip ({type(e).__name__}: {str(e)[:150]})")
+    return None
 
 
 # ------------------------------------------------------------------ audio sfx
@@ -242,22 +268,23 @@ def analyze(videos, work: Path, vision_model=None, log=None):
         sample = shots[:: max(1, len(shots) // 80)]
         _log(log, f"   style: {len(shots)} shots — motion / transitions")
         for a, b in sample:
-            z, p = shot_motion(cap, a, b)
-            zooms.append(z)
-            pans.append(p)
+            z, p = _try(None, "motion", lambda: shot_motion(cap, a, b), (0.0, 0.0))
+            if np.isfinite(z) and np.isfinite(p):
+                zooms.append(z)
+                pans.append(p)
         for a, _ in shots[1:: max(1, len(shots) // 60)]:
-            trans.append(classify_transition(cap, a, fps))
+            trans.append(_try(None, "transition", lambda: classify_transition(cap, a, fps), "cut"))
         mids = [(a + b) / 2 for a, b in sample]
-        looks.append(look_stats(cap, mids[:40]))
+        lk = _try(log, "look", lambda: look_stats(cap, mids[:40]), None)
+        if lk:
+            looks.append(lk)
         _log(log, "   style: text / sfx")
-        ts = text_stats(cap, shots, work)
+        ts = _try(log, "text", lambda: text_stats(cap, shots, work), None)
         if ts:
             texts.append(ts)
-        try:
-            au, sr = _audio(v, work)
-            sfx.append(sfx_at_cuts(au, sr, [a for a, _ in shots[1:]]))
-        except Exception:
-            pass
+        sf = _try(log, "sfx", lambda: sfx_at_cuts(*_audio(v, work), [a for a, _ in shots[1:]]), None)
+        if sf:
+            sfx.append(sf)
         if vision_model:
             n = vision_notes(cap, mids[:: max(1, len(mids) // 8)], vision_model, log)
             if n:
@@ -282,5 +309,16 @@ def analyze(videos, work: Path, vision_model=None, log=None):
         "sfx": {k: float(np.mean([s[k] for s in sfx])) for k in ("whoosh", "hit", "riser")} if sfx else {},
         "vision": notes,
     }
+    prof = _clean(prof)
     (work / "style_profile.json").write_text(json.dumps(prof, indent=2))
     return prof
+
+
+def _clean(x):
+    if isinstance(x, dict):
+        return {k: _clean(v) for k, v in x.items()}
+    if isinstance(x, list):
+        return [_clean(v) for v in x]
+    if isinstance(x, float) and not np.isfinite(x):
+        return 0.0
+    return x
