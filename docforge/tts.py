@@ -24,12 +24,11 @@ def _h():
 
 
 def list_voices(search="", source=""):
-    """[{name, id, source, gender, accent, preview}] from AI33 /v3/voices."""
-    params = {"page_size": 100}
+    """[{name, id, source, gender, accent, preview}] from AI33 /v3/voices.
+    AI33 ka API 'provider' lazmi mangta hai — abhi sirf 'elevenlabs' allowed hai."""
+    params = {"page_size": 100, "provider": source or "elevenlabs"}
     if search:
         params["search"] = search
-    if source:
-        params["provider"] = source
     r = requests.get(f"{AI33}/v3/voices", headers=_h(), params=params, timeout=60)
     if r.status_code != 200:
         raise RuntimeError(f"AI33 voices {r.status_code}: {r.text[:200]}")

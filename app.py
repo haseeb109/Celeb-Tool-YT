@@ -169,7 +169,7 @@ def test_ai33(key):
 
 
 def voice_search(q, src):
-    v = voices(q or "", "" if src == "sab" else src)
+    v = voices(q or "", src or "elevenlabs")
     if v and v[0].startswith("(error"):
         return gr.Dropdown(choices=[], value=None), v[0]
     return gr.Dropdown(choices=v, value=v[0] if v else None), f"{len(v)} voices"
@@ -407,7 +407,7 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
                 gr.Markdown("**AI33 Pro**")
                 with gr.Row():
                     s_vq = gr.Textbox(label="Search", placeholder="jaise: deep male, narrator, british", scale=3)
-                    s_src = gr.Dropdown(["sab", "elevenlabs", "minimax"], value="sab", label="Source", scale=1)
+                    s_src = gr.Dropdown(["elevenlabs"], value="elevenlabs", label="Voice library", scale=1)
                 s_vref = gr.Button("🔍 Voices dhoondo / load")
                 s_vcount = gr.Markdown()
                 s_voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="Default voice (ya voice_id paste karo)", allow_custom_value=True)
