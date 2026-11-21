@@ -32,6 +32,11 @@ def voices(provider=None):
         return [f"(error: {str(e)[:80]})"]
 
 
+def _eff():
+    from docforge.tts import effective_provider
+    return effective_provider(load_config())
+
+
 def _vid(choice):
     return choice.split("::")[-1].strip() if choice and "::" in choice else (choice or None)
 
@@ -146,6 +151,10 @@ def load_output(job):
 # keys
 def keys_save(dk, ek, ak):
     save_keys(dk or None, ek or None, ak or None)
+    if ak and not ek:
+        save_local({"voice": {"provider": "ai33"}})
+    elif ek and not ak:
+        save_local({"voice": {"provider": "elevenlabs"}})
     return ("✔ Keys save ho gayin (.env, sirf aapke Mac par)", mask("DEPLOY_API_KEY"), mask("ELEVENLABS_API_KEY"),
             mask("AI33_API_KEY"), "", "", "")
 
@@ -168,6 +177,8 @@ def test_voice(provider, key):
     if key:
         save_keys(None, key if provider == "elevenlabs" else None, key if provider == "ai33" else None)
     v = voices(provider)
+    if v and not v[0].startswith("(error"):
+        save_local({"voice": {"provider": provider}})  # jo test pass ho wahi provider ban jaye
     ok = v and not v[0].startswith("(error")
     return f"✔ {provider} chal raha hai: {len(v)} voices" if ok else f"✖ {provider}: {v[0] if v else 'no voices'}", mask(env)
 
@@ -399,7 +410,7 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
                 s_aeff = gr.Dropdown(["low", "high", "max"], value=cfg["llm"]["auditor_reasoning"], label="Auditor reasoning")
             with gr.Column():
                 gr.Markdown("### Voice")
-                s_prov = gr.Radio(["elevenlabs", "ai33"], value=cfg["voice"].get("provider", "elevenlabs"), label="Voice provider")
+                s_prov = gr.Radio(["elevenlabs", "ai33"], value=_eff(), label="Voice provider")
                 s_voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="Default voice", allow_custom_value=True)
                 s_vref = gr.Button("↻ Voices load")
                 s_model = gr.Textbox(cfg["voice"]["model_id"], label="ElevenLabs model")
@@ -432,7 +443,7 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
 
     # wiring
     for btn, dd in ((vref, voice), (qref, qvoice)):
-        btn.click(lambda: gr.Dropdown(choices=voices(load_config()["voice"].get("provider"))), None, dd)
+        btn.click(lambda: gr.Dropdown(choices=voices(_eff())), None, dd)
     s_vref.click(lambda p: gr.Dropdown(choices=voices(p)), s_prov, s_voice)
     upd.click(do_update, None, upd_msg)
     from docforge import styles as _st

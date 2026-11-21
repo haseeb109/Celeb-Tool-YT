@@ -15,11 +15,22 @@ AI33 = "https://api.ai33.pro"
 PROVIDER = {"name": None}  # set by pipeline/app from config
 
 
+def effective_provider(cfg):
+    """Setting ke mutabiq provider — lekin agar us ki key nahi aur doosre ki hai, to doosra."""
+    want = cfg["voice"].get("provider", "elevenlabs")
+    has = {"elevenlabs": bool(os.environ.get("ELEVENLABS_API_KEY")), "ai33": bool(os.environ.get("AI33_API_KEY"))}
+    if not has.get(want):
+        other = "ai33" if want == "elevenlabs" else "elevenlabs"
+        if has[other]:
+            return other
+    return want
+
+
 def provider():
     if PROVIDER["name"]:
         return PROVIDER["name"]
     from .config import load_config
-    return load_config()["voice"].get("provider", "elevenlabs")
+    return effective_provider(load_config())
 
 
 def _key(p=None):
