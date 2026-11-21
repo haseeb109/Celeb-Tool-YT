@@ -81,10 +81,8 @@ def resolve_voice(name_or_id):
 
 def synth(text, voice_id, vcfg, out_mp3: Path, prev_text="", next_text="", cache_dir: Path = None):
     """Create task → poll /v1/task/{id} → download metadata.audio_url. Returns alignment for subtitles."""
-    payload = {"text": text, "model_id": vcfg["model_id"], "with_transcript": False,
-               "voice_settings": {"speed": float(vcfg.get("speed", 1.0)), "stability": vcfg["stability"],
-                                  "similarity_boost": vcfg["similarity_boost"], "style": vcfg["style"]}}
-    h = hashlib.sha256(json.dumps(["ai33", payload, voice_id], sort_keys=True).encode()).hexdigest()[:20]
+    form = {"text": text, "voice_id": voice_id, "speed": str(float(vcfg.get("speed", 1.0))), "with_transcript": "false"}
+    h = hashlib.sha256(json.dumps(["ai33v3", form], sort_keys=True).encode()).hexdigest()[:20]
     cm = None
     if cache_dir:
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -92,25 +90,30 @@ def synth(text, voice_id, vcfg, out_mp3: Path, prev_text="", next_text="", cache
         if cm.exists():
             out_mp3.write_bytes(cm.read_bytes())
             return _even_alignment(text, out_mp3)
-    r = requests.post(f"{AI33}/v1/text-to-speech/{voice_id}?output_format=mp3_44100_192", headers=_h(), json=payload, timeout=120)
-    if r.status_code != 200:
+    # AI33 API v3: multipart form (text, voice_id, speed) → task_id
+    r = requests.post(f"{AI33}/v3/text-to-speech", headers={"xi-api-key": _key()}, data=form, timeout=120)
+    try:
+        j = r.json()
+    except ValueError:
         raise RuntimeError(f"AI33 {r.status_code}: {r.text[:300]}")
-    j = r.json()
-    tid = j.get("task_id")
-    if not j.get("success", True) or not tid:
-        raise RuntimeError(f"AI33 task nahi bana: {str(j)[:300]}")
+    tid = j.get("task_id") or (j.get("data") or {}).get("task_id")
+    if r.status_code >= 300 or j.get("success") is False or not tid:
+        raise RuntimeError(f"AI33 task nahi bana ({r.status_code}): {str(j)[:300]}")
     t0, url = time.time(), None
     while True:
         if time.time() - t0 > 600:
             raise RuntimeError(f"AI33 task {tid} 10 min mein complete nahi hua")
         time.sleep(2)
-        tj = requests.get(f"{AI33}/v1/task/{tid}", headers=_h(), timeout=60).json()
+        tj = requests.get(f"{AI33}/v1/task/{tid}", headers={"xi-api-key": _key()}, timeout=60).json()
         st = str(tj.get("status", "")).lower()
         if st == "done":
-            url = (tj.get("metadata") or {}).get("audio_url")
+            md = tj.get("metadata") or {}
+            url = md.get("audio_url") or md.get("output_uri") or tj.get("output_uri")
+            if not url:
+                raise RuntimeError(f"AI33 task done lekin audio URL nahi: {str(tj)[:300]}")
             break
         if st in ("error", "failed"):
-            raise RuntimeError(f"AI33 task error: {str(tj)[:300]}")
+            raise RuntimeError(f"AI33 task error: {str(tj.get('error') or tj.get('message') or tj)[:300]}")
     a = requests.get(url, timeout=300)
     a.raise_for_status()
     out_mp3.write_bytes(a.content)
