@@ -52,6 +52,11 @@ video:
   broll_grade: false        # dark documentary grade (desaturate + contrast + vignette)
   clip_tag: ""              # off (master prompt mein nahi). On karna ho to "ORIGINAL CLIP"
   label_cards: false        # off (master prompt mein nahi). On karna ho to true
+  # Competitor ka editing style copy: pacing, zoom/pan, transitions, text style, look, sound effects.
+  # Ye sirf VIDEO layer hai — script / master prompt par koi asar nahi.
+  replicate_style: true
+  vision_model: "qwen2.5vl:7b"   # Ollama local vision model (16GB RAM ok). "" = skip
+  sfx_gain_db: -6               # sound effects volume
   # Overlays abhi Pillow se bante hain (tez, Node ki zaroorat nahi). HyperFrames animated cards = phase 2.
 
 music:

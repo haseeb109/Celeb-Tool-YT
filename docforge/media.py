@@ -95,11 +95,13 @@ def refine_edges(src, start, end, quote, work: Path, log):
 
 
 # ------------------------------------------------------------------ segments
-def cut_clip(src, start, end, out: Path, cfg, W, H, tag_png=None):
+def cut_clip(src, start, end, out: Path, cfg, W, H, tag_png=None, trans="cut"):
     dur = end - start
     inputs = ["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src)]
     vf = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
-          f"setsar=1,fps={cfg['video']['fps']}[v0]")
+          f"setsar=1,fps={cfg['video']['fps']}"
+          + (",fade=t=in:st=0:d=0.18:color=white" if trans == "flash" else ",fade=t=in:st=0:d=0.3:color=black" if trans == "dip_to_black" else "")
+          + "[v0]")
     last = "v0"
     if tag_png:
         inputs += ["-loop", "1", "-t", f"{dur:.3f}", "-i", str(tag_png)]
@@ -112,8 +114,41 @@ def cut_clip(src, start, end, out: Path, cfg, W, H, tag_png=None):
     return out
 
 
-def broll_segment(shots, vo_mp3, out: Path, cfg, W, H, card_png=None, gap=0.35):
-    """shots: [(src_path, start, dur)]  — muted footage cut to VO length."""
+def _shot_chain(n, src_i, d, fx, cfg, W, H, cw, ch, c):
+    """One shot: edge-crop → cover → per-shot zoom/pan → transition-in (all from style profile)."""
+    fps = cfg["video"]["fps"]
+    z, pan, tr = fx.get("zoom", 0.0), fx.get("pan", 0.0), fx.get("trans", "cut")
+    margin = 1.0 + abs(pan) * d + 0.02
+    BW, BH = int(W * margin) // 2 * 2, int(H * margin) // 2 * 2
+    f = (f"[{src_i}:v]crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{c['left'] / 100:.4f}:ih*{c['top'] / 100:.4f},"
+         f"scale={BW}:{BH}:force_original_aspect_ratio=increase,crop={BW}:{BH},setsar=1,fps={fps}")
+    if abs(z) > 0.001:
+        grow = f"(1+{abs(z):.4f}*t)" if z > 0 else f"(1+{abs(z):.4f}*({d:.3f}-t))"
+        f += f",scale=w='{BW}*{grow}':h=-2:eval=frame"
+    x = f"(iw-{W})/2+{pan * W:.2f}*(t-{d / 2:.3f})" if abs(pan) > 0.001 else f"(iw-{W})/2"
+    f += f",crop={W}:{H}:x='max(0,min(iw-{W},{x}))':y='(ih-{H})/2'"
+    if tr == "flash":
+        f += ",fade=t=in:st=0:d=0.18:color=white"
+    elif tr == "dip_to_black":
+        f += ",fade=t=in:st=0:d=0.3:color=black"
+    return f + f",format=yuv420p[s{n}]"
+
+
+def finish_chain(look, W, H):
+    """Look elements measured on the competitor (letterbox / vignette / grain)."""
+    out = ""
+    if look.get("letterbox", 0) > 0.04:
+        bar = int(H * look["letterbox"]) // 2 * 2
+        out += f",drawbox=x=0:y=0:w={W}:h={bar}:color=black:t=fill,drawbox=x=0:y={H - bar}:w={W}:h={bar}:color=black:t=fill"
+    if look.get("vignette_ratio", 1) < 0.72:
+        out += ",vignette=PI/4.5"
+    if look.get("grain", 0) > 6:
+        out += f",noise=alls={min(18, int(look['grain']))}:allf=t"
+    return out
+
+
+def broll_segment(shots, vo_mp3, out: Path, cfg, W, H, card_png=None, gap=0.35, look=None):
+    """shots: [(src_path, start, dur, fx)] — muted footage cut to VO length, edited per style profile."""
     vo_d = duration(vo_mp3)
     total = vo_d + gap
     seq, acc, i = [], 0.0, 0
@@ -122,25 +157,22 @@ def broll_segment(shots, vo_mp3, out: Path, cfg, W, H, card_png=None, gap=0.35):
         seq.append(s)
         acc += s[2]
         i += 1
-        if i > 200:
+        if i > 300:
             break
     c = cfg["video"]["broll_crop"]
     cw, ch = 1 - (c["left"] + c["right"]) / 100, 1 - (c["top"] + c["bottom"]) / 100
-    BW, BH = int(W * 1.08) // 2 * 2, int(H * 1.08) // 2 * 2
     args, chains = [], []
-    for n, (src, st, d) in enumerate(seq):
+    for n, sh in enumerate(seq):
+        src, st, d = sh[0], sh[1], sh[2]
+        fx = sh[3] if len(sh) > 3 else {}
         args += ["-ss", f"{st:.3f}", "-t", f"{d:.3f}", "-i", str(src)]
-        chains.append(f"[{n}:v]crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{c['left'] / 100:.4f}:ih*{c['top'] / 100:.4f},"
-                      f"scale={BW}:{BH}:force_original_aspect_ratio=increase,crop={BW}:{BH},setsar=1,"
-                      f"fps={cfg['video']['fps']},format=yuv420p[s{n}]")
+        chains.append(_shot_chain(n, n, d, fx, cfg, W, H, cw, ch, c))
     k = len(seq)
-    fc = ";".join(chains) + ";" + "".join(f"[s{n}]" for n in range(k)) + f"concat=n={k}:v=1:a=0,trim=0:{total:.3f},setpts=PTS-STARTPTS[cat]"
-    fc += f";[cat]crop={W}:{H}:x='(iw-{W})*(0.5+0.5*sin(t/6))':y='(ih-{H})*(0.5+0.5*cos(t/9))'"
+    fc = ";".join(chains) + ";" + "".join(f"[s{n}]" for n in range(k)) + f"concat=n={k}:v=1:a=0,trim=0:{total:.3f},setpts=PTS-STARTPTS"
     if cfg["video"]["broll_grade"]:
         fc += ",eq=saturation=0.72:contrast=1.1:brightness=-0.035,vignette=PI/4.5"
-    fc += "[bv]"
+    fc += finish_chain(look or {}, W, H) + "[bv]"
     last = "bv"
-    ai = k
     args += ["-i", str(vo_mp3)]
     if card_png:
         show = min(6.5, total - 0.6)
@@ -148,10 +180,16 @@ def broll_segment(shots, vo_mp3, out: Path, cfg, W, H, card_png=None, gap=0.35):
         fc += (f";[{k + 1}:v]format=rgba,fade=t=in:st=0:d=0.35:alpha=1,fade=t=out:st={max(0, show - 0.4):.3f}:d=0.4:alpha=1,"
                f"setpts=PTS-STARTPTS+0.5/TB[cd];[bv][cd]overlay=0:0:eof_action=pass[bv2]")
         last = "bv2"
-    fc += f";[{ai}:a]aresample=48000,apad=whole_dur={total:.3f}[a]"
+    fc += f";[{k}:a]aresample=48000,apad=whole_dur={total:.3f}[a]"
     run(["ffmpeg", "-y", *args, "-filter_complex", fc, "-map", f"[{last}]", "-map", "[a]",
          "-t", f"{total:.3f}", *common_out(cfg, W), str(out)])
-    return out, total
+    # cut points inside this segment (for sound effects)
+    cuts, t = [], 0.0
+    for sh in seq[:-1]:
+        t += sh[2]
+        if t < total - 0.3:
+            cuts.append((t, (sh[3] if len(sh) > 3 else {}).get("trans", "cut")))
+    return out, total, cuts
 
 
 def concat(parts, out: Path):
@@ -182,17 +220,25 @@ def music_bed(folder: Path, total, out: Path, seed, work: Path):
     return out
 
 
-def final_mix(video: Path, music: Path, out: Path, cfg, W, srt: Path = None, stems_dir: Path = None):
+def final_mix(video: Path, music: Path, out: Path, cfg, W, srt: Path = None, stems_dir: Path = None, sfx: Path = None):
     m = cfg["music"]
     burn = srt is not None and srt.exists()
     args = ["ffmpeg", "-y", "-i", str(video)]
+    voice = "[0:a]"
+    pre = ""
+    if sfx:  # sound effects ride on the voice bus (so music ducks under them too)
+        args += ["-i", str(sfx)]
+        si = 1
+        pre = f"[0:a][{si}:a]amix=inputs=2:duration=first:normalize=0[vx];"
+        voice = "[vx]"
     if music:
+        mi = 2 if sfx else 1
         args += ["-i", str(music)]
         duck = "[mv][vk]sidechaincompress=threshold=0.025:ratio=10:attack=15:release=450[md]" if m["duck"] else "[mv]anull[md]"
-        fa = (f"[1:a]volume={m['volume_db']}dB[mv];[0:a]asplit=2[vk][vo];{duck};"
+        fa = (pre + f"[{mi}:a]volume={m['volume_db']}dB[mv];{voice}asplit=2[vk][vo];{duck};"
               f"[vo][md]amix=inputs=2:duration=first:normalize=0,loudnorm=I=-14:TP=-1:LRA=11[a]")
     else:
-        fa = "[0:a]loudnorm=I=-14:TP=-1:LRA=11[a]"
+        fa = pre + f"{voice}loudnorm=I=-14:TP=-1:LRA=11[a]"
     if burn:
         style = "FontName=Arial Black,FontSize=15,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=0,MarginV=60"
         srt_esc = str(srt.resolve()).replace(":", r"\:").replace("'", r"\'")
@@ -207,6 +253,8 @@ def final_mix(video: Path, music: Path, out: Path, cfg, W, srt: Path = None, ste
         run(["ffmpeg", "-y", "-i", str(video), "-vn", "-ar", "48000", str(stems_dir / "voice_and_clips.wav")])
         if music:
             run(["ffmpeg", "-y", "-i", str(music), "-af", f"volume={m['volume_db']}dB", str(stems_dir / "music.wav")])
+        if sfx:
+            shutil.copy(sfx, stems_dir / "sfx.wav")
     return out
 
 

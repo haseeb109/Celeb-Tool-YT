@@ -28,15 +28,21 @@ def font(size, fonts_dir: Path = None):
     return ImageFont.load_default(size)
 
 
-def label_card(kind, text, W, H, out: Path, fonts_dir=None):
-    """Lower-left documentary card: colored tag + white statement."""
+def label_card(kind, text, W, H, out: Path, fonts_dir=None, tstyle=None):
+    """Documentary card: colored tag + statement. tstyle (from competitor OCR) sets position, size, color, CAPS."""
     s = W / 1920
+    tstyle = tstyle or {}
     img = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(img)
     col = CARD_COLORS.get(kind, (214, 40, 40))
-    ft, fb = font(int(34 * s), fonts_dir), font(int(54 * s), fonts_dir)
-    x, y = int(90 * s), int(H - 470 * s)  # above subtitle zone
-    lines = textwrap.wrap(text.upper(), 30)[:2]
+    body_px = int(max(36, min(90, tstyle.get("height_ratio", 0.05) * H / s)) * s) if tstyle else int(54 * s)
+    ft, fb = font(int(body_px * 0.62), fonts_dir), font(body_px, fonts_dir)
+    pos = tstyle.get("position", "bottom")
+    x = int(90 * s)
+    y = int(110 * s) if pos == "top" else int(H / 2 - body_px) if pos == "center" else int(H - 470 * s)
+    txt = text.upper() if tstyle.get("caps_ratio", 1.0) > 0.6 else text
+    tcol = tuple(tstyle.get("color_rgb", [255, 255, 255])) + (255,)
+    lines = textwrap.wrap(txt, 30)[:2]
     tw = max([d.textlength(l, font=fb) for l in lines] + [d.textlength(kind, font=ft) + 40 * s])
     box_h = int((70 + 66 * len(lines)) * s)
     d.rectangle([x - 24 * s, y - 20 * s, x + tw + 36 * s, y + box_h], fill=(0, 0, 0, 175))
@@ -44,7 +50,7 @@ def label_card(kind, text, W, H, out: Path, fonts_dir=None):
     d.rectangle([x, y, x + d.textlength(kind, font=ft) + 24 * s, y + 46 * s], fill=col + (255,))
     d.text((x + 12 * s, y + 4 * s), kind, font=ft, fill=(255, 255, 255, 255) if kind != "QUOTE" else (0, 0, 0, 255))
     for i, l in enumerate(lines):
-        d.text((x, y + (62 + 64 * i) * s), l, font=fb, fill=(255, 255, 255, 255))
+        d.text((x, y + (62 * s) + (body_px * 1.18) * i), l, font=fb, fill=tcol)
     img.save(out)
     return out
 

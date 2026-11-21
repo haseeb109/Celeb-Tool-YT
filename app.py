@@ -13,7 +13,7 @@ from docforge.jobs import create_job, list_jobs
 from docforge.pipeline import STAGES, run_job
 
 _worker = {"thread": None, "current": None}
-STAGE_LABELS = ["Download", "Plan", "Script", "QA", "Clips", "Voice", "Visuals", "Assemble", "Package"]
+STAGE_LABELS = ["Download", "Style", "Plan", "Script", "QA", "Clips", "Voice", "Visuals", "Assemble", "Package"]
 CSS = """
 .gradio-container {max-width: 1400px !important}
 #title h1 {margin-bottom: 0}

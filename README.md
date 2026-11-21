@@ -38,6 +38,7 @@ cp -r jobs/_example jobs/drake-feud        # job.yaml + transcript1.txt + transc
 | # | Stage | Kya karta hai |
 |---|---|---|
 | 1 | ingest | yt-dlp se dono videos download, transcript ↔ video length check |
+| 1b | style | competitor ka editing style naapta hai: shot length/pacing, zoom/pan speed, transitions (cut/flash/dip/crossfade), screen text ka style (Mac OCR), look (letterbox/vignette/grain), sound effects (whoosh/hit/riser) → `style_profile.json` |
 | 2 | plan | DeepSeek: outline + montage + saari clips (sirf line IDs se) |
 | 3 | write | DeepSeek: montage + har section alag call (word target enforce) |
 | 4 | qa | Phase 1: Python checks · Phase 2: GLM independent audit → major galti ho to khud rewrite (max 3 rounds) |
@@ -59,3 +60,9 @@ cp -r jobs/_example jobs/drake-feud        # job.yaml + transcript1.txt + transc
 - `video.encoder: auto`: M1 par Apple hardware encoder (tez).
 - `script.*`: word range, clip durations, QA rounds.
 - `llm.*_reasoning`: `high` default. Sasta/tez chahiye to `low`.
+
+## Competitor style replicate (free, local)
+`video.replicate_style: true` ho to har job ki do source videos ka editing style naap kar aapki video mein copy hota hai. Ye sirf video layer hai, script aur master prompt par koi asar nahi.
+- Pacing aur zoom PySceneDetect + OpenCV se, text style Apple Vision OCR (`ocrmac`) se.
+- Ollama `qwen2.5vl:7b` effects pehchanta hai (16GB RAM par chal jata hai). `install.sh` ise khud install karta hai.
+- Sound effects `assets/sfx/whoosh|hit|riser/` se aate hain. Pehli dafa basic set khud ban jata hai; apne SFX in folders mein daal do to wahi use honge.

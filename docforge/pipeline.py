@@ -1,13 +1,14 @@
 """Orchestrator. Every stage writes its result into jobs/<id>/work/ and is skipped on re-run (resume)."""
 import csv
 import json
+import random
 import time
 import traceback
 from pathlib import Path
 
 import yaml
 
-from . import media, overlays, packaging, tts
+from . import media, overlays, packaging, sfx, style, tts
 from .config import ROOT, load_config, master_prompt_text
 from .llm import LLM
 from .qa import run_qa
@@ -15,7 +16,7 @@ from .script_engine import (clean_segments, make_plan, narration_words, register
                             write_montage, write_section, clip_log_rows)
 from .transcript import Transcript, fmt
 
-STAGES = ["ingest", "plan", "write", "qa", "clips", "voice", "visuals", "assemble", "package"]
+STAGES = ["ingest", "style", "plan", "write", "qa", "clips", "voice", "visuals", "assemble", "package"]
 
 
 class Job:
@@ -129,6 +130,46 @@ def stage_ingest(job, cfg, ts, llm, **_):
     job.j("transcripts.json", {t.src: t.to_dict() for t in ts})
 
 
+def stage_style(job, cfg, ts, llm, **_):
+    if not cfg["video"].get("replicate_style"):
+        job.j("style_profile.json", {})
+        job.log("   replicate_style off — skip")
+        return
+    prof = style.analyze([srcfile(job, t.src) for t in ts], job.work / "style",
+                         cfg["video"].get("vision_model") or None, job.log)
+    job.j("style_profile.json", prof)
+    p, m, tr = prof["pacing"], prof["motion"], prof["transitions"]
+    job.log(f"   pacing: shot {p['median_shot_s']:.1f}s median ({p['cuts_per_min']:.0f} cuts/min) · "
+            f"motion {m['moving_ratio']:.0%} shots (zoom-in {m['zoom_in_ratio']:.0%}) · "
+            f"transitions {', '.join(f'{k} {v:.0%}' for k, v in tr.items() if v)} · sfx {prof.get('sfx')}")
+
+
+def _profile(job):
+    p = job.work / "style_profile.json"
+    return json.loads(p.read_text()) if p.exists() else {}
+
+
+def _fx(prof, rng, d):
+    """Per-shot effect sampled from the measured distributions."""
+    if not prof:
+        return {}
+    m, tr = prof["motion"], prof["transitions"]
+    fx = {"trans": rng.choices(list(tr), weights=list(tr.values()))[0] if sum(tr.values()) else "cut"}
+    if rng.random() < m["moving_ratio"]:
+        sp = m["zoom_speed"] * rng.uniform(0.8, 1.2)
+        fx["zoom"] = sp if rng.random() < m["zoom_in_ratio"] else -sp
+        if m.get("pan_speed", 0) > 0.003:
+            fx["pan"] = m["pan_speed"] * rng.choice([-1, 1])
+    return fx
+
+
+def _shot_len(prof, rng):
+    if not prof:
+        return 4.5
+    p = prof["pacing"]
+    return max(0.8, min(8.0, rng.uniform(p["p25_shot_s"], p["p75_shot_s"])))
+
+
 def stage_plan(job, cfg, ts, llm, **_):
     plan = make_plan(llm, cfg, job.spec, ts, job.log)
     clips = register_clips(plan, ts)
@@ -191,7 +232,10 @@ def stage_clips(job, cfg, ts, llm, **_):
         c = script["clips"][cid]
         st, en, how = media.refine_edges(srcfile(job, c["src"]), c["start"], c["end"], c["quote"], job.work, job.log)
         c["cut_start"], c["cut_end"], c["edge_source"] = st, en, how
-        media.cut_clip(srcfile(job, c["src"]), st, en, d / f"{cid}.mp4", cfg, job.W, job.H, tag)
+        prof = _profile(job)
+        tr = prof.get("transitions", {})
+        trans = random.Random(cid + job.id).choices(list(tr), weights=list(tr.values()))[0] if tr and sum(tr.values()) else "cut"
+        media.cut_clip(srcfile(job, c["src"]), st, en, d / f"{cid}.mp4", cfg, job.W, job.H, tag, trans)
         job.log(f"   {cid} T{c['src']} {fmt(st)}–{fmt(en)} ({en - st:.1f}s, {how})")
     job.j("script.json", script)
 
@@ -252,6 +296,8 @@ def stage_visuals(job, cfg, ts, llm, **_):
     d.mkdir(exist_ok=True)
     fonts = ROOT / cfg["paths"]["fonts"]
     clip_ranges = [(c["src"], c["start"], c["end"]) for c in script["clips"].values()]
+    prof = _profile(job)
+    rng = random.Random(job.id)
     k = 0
     for si, sec in enumerate(script["sections"]):
         for gi, s in enumerate(sec["segments"]):
@@ -264,17 +310,21 @@ def stage_visuals(job, cfg, ts, llm, **_):
                 dur = en - st
                 # long ranges → several 3–5s shots for pacing
                 pos = st
-                while pos < en - 1.5:
-                    shots.append((srcfile(job, b["src"]), pos, min(4.5, en - pos)))
-                    pos += 4.5
+                while pos < en - 0.8:
+                    L = min(_shot_len(prof, rng), en - pos)
+                    shots.append((srcfile(job, b["src"]), pos, L, _fx(prof, rng, L)))
+                    pos += L
             if not shots:
-                shots = _fallback_shots(job, ts, clip_ranges, k)
+                shots = [(a, b_, _shot_len(prof, rng), _fx(prof, rng, 3)) for a, b_, _ in _fallback_shots(job, ts, clip_ranges, k)]
             card = None
-            if cfg["video"]["label_cards"] and s.get("card"):
+            tstyle = prof.get("text") if prof else None
+            use_cards = cfg["video"]["label_cards"] or (tstyle and tstyle.get("overlay_rate", 0) >= 0.15)
+            if use_cards and s.get("card"):
                 card = overlays.label_card(s["card"]["kind"].upper(), s["card"]["text"], job.W, job.H,
-                                           job.work / f"card_{si:02d}_{gi:02d}.png", fonts)
-            _, tot = media.broll_segment(shots, Path(s["vo"]), out, cfg, job.W, job.H, card)
-            s["seg"], s["seg_dur"] = str(out), tot
+                                           job.work / f"card_{si:02d}_{gi:02d}.png", fonts, tstyle)
+            _, tot, cuts = media.broll_segment(shots, Path(s["vo"]), out, cfg, job.W, job.H, card,
+                                               look=prof.get("look") if prof else None)
+            s["seg"], s["seg_dur"], s["cuts"] = str(out), tot, cuts
             k += 1
         job.log(f"   visuals {sec['id']} ready")
     job.j("script.json", script)
@@ -283,17 +333,22 @@ def stage_visuals(job, cfg, ts, llm, **_):
 def stage_assemble(job, cfg, ts, llm, **_):
     script = job.j("script.json")
     parts, t, placements, sec_starts, srt = [], 0.0, {}, [], []
+    cut_ev, clip_ev = [], []
     for sec in script["sections"]:
         sec_starts.append(("Intro" if sec["id"] == "S0" else sec["heading"], t))
         for s in sec["segments"]:
             if s["type"] == "clip":
                 p = job.work / "clips" / f"{s['ref']}.mp4"
                 placements[s["ref"]] = t
+                clip_ev.append(t)
                 parts.append(p)
                 t += media.duration(p)
             else:
                 for (w, a, b) in _chunk_words(tts.words_from_alignment(s["align"])):
                     srt.append((t + a, t + b, w))
+                cut_ev += [(t + ct, tr) for ct, tr in s.get("cuts", [])]
+                if parts:
+                    cut_ev.append((t, "cut"))
                 parts.append(Path(s["seg"]))
                 t += media.duration(s["seg"])
     tag = "4k" if job.W > 2000 else "1080p"
@@ -305,7 +360,13 @@ def stage_assemble(job, cfg, ts, llm, **_):
     music = media.music_bed(ROOT / cfg["music"]["folder"], t, job.work / "music_bed.wav", job.id, job.work)
     if not music:
         job.log("   ⚠ assets/music khali hai — video bina music ke")
-    final = media.final_mix(full, music, job.out / f"{job.id}_{tag}.mp4", cfg, job.W, srt_path, job.out / "stems")
+    sfx_path = None
+    rates = _profile(job).get("sfx") or {}
+    if rates and sum(rates.values()) > 0.02:
+        ev = sfx.plan_events(cut_ev, clip_ev, rates, job.id)
+        sfx_path = sfx.render(ev, t, ROOT / "assets" / "sfx", job.work / "sfx_track.wav", job.id, cfg["video"].get("sfx_gain_db", -6))
+        job.log(f"   sound effects: {len(ev)} (competitor rates {rates})")
+    final = media.final_mix(full, music, job.out / f"{job.id}_{tag}.mp4", cfg, job.W, srt_path, job.out / "stems", sfx_path)
     script["placements"], script["section_starts"], script["runtime"] = placements, sec_starts, t
     script["montage_end"] = sec_starts[1][1] if len(sec_starts) > 1 else 0
     job.j("script.json", script)

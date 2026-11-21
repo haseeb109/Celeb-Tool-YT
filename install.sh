@@ -16,6 +16,13 @@ done
 # HyperFrames (optional overlay engine) ke liye Node 22+
 if ! command -v node >/dev/null; then say "brew install node (optional, HyperFrames ke liye)"; brew install node || true; fi
 
+# Local vision model (style analysis) — free, 16GB RAM par chal jata hai
+if ! command -v ollama >/dev/null; then say "brew install ollama"; brew install ollama || true; fi
+if command -v ollama >/dev/null; then
+  (brew services start ollama >/dev/null 2>&1 || (ollama serve >/dev/null 2>&1 &)); sleep 3
+  ollama list | grep -q "qwen2.5vl:7b" || { say "ollama pull qwen2.5vl:7b (~6GB, ek dafa)"; ollama pull qwen2.5vl:7b || true; }
+fi
+
 say "Python env (.venv)"
 uv venv --python 3.12 .venv
 uv pip install --python .venv/bin/python -r requirements.txt
