@@ -192,7 +192,7 @@ def vision_notes(cap, times, model, log=None):
     import requests
     imgs = []
     for t in times[:4]:
-        f = _frame_at(cap, t, 512)
+        f = _frame_at(cap, t, 448)
         if f is not None:
             imgs.append(base64.b64encode(cv2.imencode(".jpg", f)[1]).decode())
     prompt = ("These are frames from one YouTube documentary. Describe ONLY the editing/visual style, as JSON: "
@@ -202,7 +202,7 @@ def vision_notes(cap, times, model, log=None):
     try:
         r = requests.post("http://127.0.0.1:11434/api/generate", timeout=900, json={
             "model": model, "prompt": prompt, "images": imgs, "stream": False, "format": "json",
-            "options": {"num_ctx": 4096}})
+            "options": {"num_ctx": 8192}})
         j = r.json()
         if "response" not in j:
             _log(log, f"   vision model skip — Ollama error: {str(j.get('error', j))[:200]}")
