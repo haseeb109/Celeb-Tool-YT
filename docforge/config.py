@@ -42,8 +42,8 @@ def load_config():
 
 
 def save_local(updates: dict):
-    cur = yaml.safe_load(LOCAL.read_text()) if LOCAL.exists() else {}
-    _merge(cur or {}, updates)
+    cur = (yaml.safe_load(LOCAL.read_text()) if LOCAL.exists() else None) or {}
+    _merge(cur, updates)
     LOCAL.write_text(yaml.safe_dump(cur, sort_keys=False, allow_unicode=True))
 
 

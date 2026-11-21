@@ -10,5 +10,6 @@ assets/music/*
 !assets/music/.keep
 *.mp4
 settings.local.yaml
+styles/_ref/
 assets/sfx/*
 !assets/sfx/.keep

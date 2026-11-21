@@ -215,6 +215,55 @@ def music_clear():
     return music_list()
 
 
+_style_job = {"thread": None, "log": []}
+
+
+def style_analyze(l1, l2, l3, f, name):
+    from docforge import styles
+    if _style_job["thread"] and _style_job["thread"].is_alive():
+        return "Analysis pehle se chal raha hai"
+    srcs = [x for x in (l1, l2, l3) if x and x.strip()] + ([f] if f else [])
+    if not srcs or not name.strip():
+        return "✖ Kam az kam 1 link/video aur style ka naam do"
+    _style_job["log"] = []
+
+    def go():
+        try:
+            styles.analyze_reference(srcs, name.strip(), lambda m: _style_job["log"].append(m))
+        except Exception as e:
+            _style_job["log"].append(f"✖ {e}")
+    _style_job["thread"] = threading.Thread(target=go, daemon=True)
+    _style_job["thread"].start()
+    return "▶ Analysis shuru (video ki length ke hisaab se 3–15 min)"
+
+
+def style_log():
+    return "\n".join(_style_job["log"][-30:]) or "(idle)"
+
+
+def style_view(slug):
+    from docforge import styles
+    return styles.summary(styles.load(slug)) if slug else ""
+
+
+def style_lock(slug):
+    from docforge import styles
+    styles.lock(slug)
+    return f"🔒 Locked: **{slug}** — ab har nayi job isi style mein banegi", lock_status()
+
+
+def style_unlock():
+    from docforge import styles
+    styles.lock("")
+    return "🔓 Unlock — har job apni source videos se style naapegi", lock_status()
+
+
+def lock_status():
+    from docforge import styles
+    lk = styles.locked()
+    return f"### 🔒 Locked style: **{lk}**" if lk else "### 🔓 Koi style lock nahi"
+
+
 def doctor_text():
     import subprocess, sys
     r = subprocess.run([sys.executable, str(ROOT / "run.py"), "doctor"], capture_output=True, text=True, cwd=ROOT)
@@ -294,6 +343,31 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
         with gr.Tab("Files"):
             ofiles = gr.Files()
 
+    with gr.Tab("🎨 Style"):
+        st_status = gr.Markdown(lock_status)
+        with gr.Row():
+            with gr.Column():
+                gr.Markdown("### 1. Competitor ki video(s) do\nEk hi channel ki 1–3 videos do, style zyada accurate aayega.")
+                st_name = gr.Textbox(label="Style ka naam", placeholder="jaise: cloutville-dark")
+                st_l1 = gr.Textbox(label="Video link 1", placeholder="https://www.youtube.com/watch?v=...")
+                st_l2 = gr.Textbox(label="Video link 2 (optional)")
+                st_l3 = gr.Textbox(label="Video link 3 (optional)")
+                st_f = gr.File(label="…ya video file upload (mp4)", type="filepath")
+                st_go = gr.Button("🔍 Analyze style", variant="primary")
+                st_msg = gr.Markdown()
+                st_log = gr.Code(label="Analysis log", value=style_log, language=None, lines=10)
+            with gr.Column():
+                gr.Markdown("### 2. Saved styles → Lock")
+                with gr.Row():
+                    st_pick = gr.Dropdown(choices=[], label="Style", allow_custom_value=False, scale=3)
+                    st_ref = gr.Button("↻", scale=0)
+                st_sum = gr.Markdown()
+                with gr.Row():
+                    st_lock = gr.Button("🔒 Lock this style", variant="primary")
+                    st_unlock = gr.Button("🔓 Unlock")
+                st_lmsg = gr.Markdown()
+                gr.Markdown("*Ye sirf video ki editing par asar karta hai (pacing, zoom, transitions, text, look, sound effects). Script aur master prompt ke rules wahi rehte hain.*")
+
     with gr.Tab("🔑 API Keys"):
         gr.Markdown("Keys sirf aapke Mac par `.env` file mein save hoti hain. GitHub par kabhi nahi jati (`.gitignore`).")
         with gr.Row():
@@ -361,6 +435,13 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
         btn.click(lambda: gr.Dropdown(choices=voices(load_config()["voice"].get("provider"))), None, dd)
     s_vref.click(lambda p: gr.Dropdown(choices=voices(p)), s_prov, s_voice)
     upd.click(do_update, None, upd_msg)
+    from docforge import styles as _st
+    st_go.click(style_analyze, [st_l1, st_l2, st_l3, st_f, st_name], st_msg)
+    st_ref.click(lambda: gr.Dropdown(choices=_st.list_styles(), value=_st.locked() or None), None, st_pick)
+    st_pick.change(style_view, st_pick, st_sum)
+    st_lock.click(style_lock, st_pick, [st_lmsg, st_status])
+    st_unlock.click(style_unlock, None, [st_lmsg, st_status])
+    ui.load(lambda: gr.Dropdown(choices=_st.list_styles(), value=_st.locked() or None), None, st_pick)
     add.click(add_job, [name, l1, t1, f1, l2, t2, f2, rumor, quality, voice, subs], [add_msg, grid])
     go.click(start_queue, qvoice, qmsg)
     rbtn.click(rerun, [rjob, rstage, qvoice], qmsg)
@@ -377,7 +458,7 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
     m_clr.click(music_clear, None, m_tbl)
     doc_btn.click(doctor_text, None, doc_out)
     timer = gr.Timer(3)
-    timer.tick(lambda: (jobs_table(), tail(), gr.Dropdown(choices=job_names())), None, [grid, log, rjob])
+    timer.tick(lambda: (jobs_table(), tail(), gr.Dropdown(choices=job_names()), style_log()), None, [grid, log, rjob, st_log])
 
 if __name__ == "__main__":
     ui.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True, allowed_paths=[str(ROOT / "output")],

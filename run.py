@@ -72,6 +72,10 @@ def main():
     sub.add_parser("voices")
     sub.add_parser("relock")
     sub.add_parser("list")
+    st = sub.add_parser("style", help="competitor style analyze + lock")
+    st.add_argument("--name", required=True)
+    st.add_argument("sources", nargs="+", help="YouTube links ya video files")
+    st.add_argument("--lock", action="store_true")
     r = sub.add_parser("run")
     r.add_argument("job", nargs="?")
     r.add_argument("--from", dest="frm", choices=STAGES)
@@ -96,6 +100,13 @@ def main():
         from docforge.tts import list_voices
         for name, vid, cat in list_voices():
             print(f"  {name:35s} {vid}  ({cat})")
+    if a.cmd == "style":
+        from docforge import styles
+        slug, prof = styles.analyze_reference(a.sources, a.name)
+        print(styles.summary(prof).replace("**", ""))
+        if a.lock:
+            styles.lock(slug)
+            print(f"🔒 locked: {slug}")
     if a.cmd == "list":
         for j in list_jobs():
             print(f"  {j['state']:8s} {j['stages_done']}/{len(STAGES)}  {j['job']}  {j['error']}")

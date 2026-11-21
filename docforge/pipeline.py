@@ -135,6 +135,12 @@ def stage_style(job, cfg, ts, llm, **_):
         job.j("style_profile.json", {})
         job.log("   replicate_style off — skip")
         return
+    from . import styles
+    lk = styles.locked()
+    if lk:  # locked competitor style → har job mein yahi
+        job.j("style_profile.json", styles.load(lk))
+        job.log(f"   🔒 locked style: {lk}")
+        return
     prof = style.analyze([srcfile(job, t.src) for t in ts], job.work / "style",
                          cfg["video"].get("vision_model") or None, job.log)
     job.j("style_profile.json", prof)
