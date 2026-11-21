@@ -5,5 +5,5 @@ link2: https://www.youtube.com/watch?v=YYYYYYYYYYY
 rumor: "One line: your main rumor / idea"
 # optional overrides:
 # quality: 4k
-# voice: "Dark Narrator"     # ElevenLabs voice name ya id
+# voice: "VOICE_ID"          # AI33 Pro voice_id
 # subtitles: true

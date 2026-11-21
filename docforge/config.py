@@ -47,7 +47,7 @@ def save_local(updates: dict):
     LOCAL.write_text(yaml.safe_dump(cur, sort_keys=False, allow_unicode=True))
 
 
-def save_keys(deploy=None, eleven=None, ai33=None):
+def save_keys(deploy=None, ai33=None):
     vals = {}
     if ENV.exists():
         for line in ENV.read_text().splitlines():
@@ -57,9 +57,6 @@ def save_keys(deploy=None, eleven=None, ai33=None):
     if deploy:
         vals["DEPLOY_API_KEY"] = deploy.strip()
         os.environ["DEPLOY_API_KEY"] = deploy.strip()
-    if eleven:
-        vals["ELEVENLABS_API_KEY"] = eleven.strip()
-        os.environ["ELEVENLABS_API_KEY"] = eleven.strip()
     if ai33:
         vals["AI33_API_KEY"] = ai33.strip()
         os.environ["AI33_API_KEY"] = ai33.strip()

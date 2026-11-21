@@ -21,8 +21,8 @@ Seedha bhi chala sakte ho: `celeb open`, `celeb update`, ya Finder mein **Celeb 
 GUI mein upar right par **⬆ Update tool** button hai: ek click mein update hota hai aur tool khud restart ho jata hai.
 
 GUI mein:
-1. **🔑 API Keys** tab: Deploy aur ElevenLabs / AI33 Pro keys paste karo, Save karo, phir Test karo. Keys sirf aapke Mac par `.env` mein rehti hain, GitHub par nahi jati.
-2. **⚙️ Settings** tab: voice provider (ElevenLabs ya AI33 Pro), default voice, quality aur music upload (ek dafa). "Run doctor" se sab check ho jata hai.
+1. **🔑 API Keys** tab: Deploy aur AI33 Pro keys paste karo, Save karo, phir Test karo. Keys sirf aapke Mac par `.env` mein rehti hain, GitHub par nahi jati.
+2. **⚙️ Settings** tab: AI33 Pro voice (search + preview sun kar chuno), quality aur music upload (ek dafa). "Run doctor" se sab check ho jata hai.
 3. **➕ New Job**: links, transcripts aur rumor daal kar Add to Queue karo.
 4. **⏳ Queue**: Run Queue dabao. Har job ke stages live dikhte hain.
 5. **🎞 Outputs**: video, script, clip log, QA report aur titles sab yahin dikhte hain.
@@ -49,7 +49,7 @@ cp -r jobs/_example jobs/drake-feud        # job.yaml + transcript1.txt + transc
 | 3 | write | DeepSeek: montage + har section alag call (word target enforce) |
 | 4 | qa | Phase 1: Python checks · Phase 2: GLM independent audit → major galti ho to khud rewrite (max 3 rounds) |
 | 5 | clips | exact clip cut (mlx-whisper se word-level edges), audio + video |
-| 6 | voice | ElevenLabs (cache: same text dobara paid nahi hota) |
+| 6 | voice | AI33 Pro (cache: same text dobara paid nahi hota) |
 | 7 | visuals | narration ke neeche dono source videos ki related footage, dark grade, ALLEGED/CONFIRMED cards |
 | 8 | assemble | concat + music ducking + optional subtitles + 1080p/4K |
 | 9 | package | titles, description, chapters, tags, thumbnail |

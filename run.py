@@ -2,7 +2,7 @@
 """DocForge CLI
 
   python run.py doctor                      # sab tools/keys check
-  python run.py voices                      # ElevenLabs voices list
+  python run.py voices                      # AI33 Pro voices list
   python run.py run                         # jobs/ ki saari pending/failed jobs (bulk)
   python run.py run jobs/<id>               # ek job
   python run.py run jobs/<id> --from voice  # kisi stage se dobara (jaise voice badalni ho)
@@ -50,7 +50,7 @@ def doctor():
     except Exception as e:
         chk("master prompt lock", False, str(e).splitlines()[0])
     chk("DEPLOY_API_KEY", os.environ.get("DEPLOY_API_KEY"), ".env mein daalo")
-    chk("ELEVENLABS_API_KEY", os.environ.get("ELEVENLABS_API_KEY"), ".env mein daalo")
+    chk("AI33_API_KEY", os.environ.get("AI33_API_KEY"), "GUI → API Keys mein daalo")
     music = list((Path(__file__).parent / cfg["music"]["folder"]).glob("*.*"))
     print(f"  {'✔' if music else '•'} music files: {len(music)}")
     if os.environ.get("DEPLOY_API_KEY"):
@@ -98,8 +98,8 @@ def main():
         print("new sha256:", relock())
     if a.cmd == "voices":
         from docforge.tts import list_voices
-        for name, vid, cat in list_voices():
-            print(f"  {name:35s} {vid}  ({cat})")
+        for v in list_voices():
+            print(f"  {v['name']:35s} {v['id']}  ({v['gender']} {v['accent']} {v['source']})")
     if a.cmd == "style":
         from docforge import styles
         slug, prof = styles.analyze_reference(a.sources, a.name)

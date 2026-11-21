@@ -22,19 +22,12 @@ CSS = """
 
 
 # ------------------------------------------------------------------ helpers
-def voices(provider=None):
+def voices(search="", source=""):
     try:
         from docforge import tts
-        if provider:
-            tts.PROVIDER["name"] = provider
-        return [f"{n}  ::  {v}" for n, v, _ in tts.list_voices()]
+        return [tts.label(v) for v in tts.list_voices(search, source)]
     except Exception as e:
         return [f"(error: {str(e)[:80]})"]
-
-
-def _eff():
-    from docforge.tts import effective_provider
-    return effective_provider(load_config())
 
 
 def _vid(choice):
@@ -149,20 +142,15 @@ def load_output(job):
 
 
 # keys
-def keys_save(dk, ek, ak):
-    save_keys(dk or None, ek or None, ak or None)
-    if ak and not ek:
-        save_local({"voice": {"provider": "ai33"}})
-    elif ek and not ak:
-        save_local({"voice": {"provider": "elevenlabs"}})
-    return ("✔ Keys save ho gayin (.env, sirf aapke Mac par)", mask("DEPLOY_API_KEY"), mask("ELEVENLABS_API_KEY"),
-            mask("AI33_API_KEY"), "", "", "")
+def keys_save(dk, ak):
+    save_keys(dk or None, ak or None)
+    return "✔ Keys save ho gayin (.env, sirf aapke Mac par)", mask("DEPLOY_API_KEY"), mask("AI33_API_KEY"), "", ""
 
 
 def test_deploy(dk):
     from docforge.llm import diagnose_deploy
     if dk:
-        save_keys(dk, None, None)
+        save_keys(dk, None)
     report, base = diagnose_deploy(load_config())
     if base:
         save_local({"llm": {"base_url": base}})
@@ -172,15 +160,26 @@ def test_deploy(dk):
     return f"```\n{report}\n```", mask("DEPLOY_API_KEY")
 
 
-def test_voice(provider, key):
-    env = "AI33_API_KEY" if provider == "ai33" else "ELEVENLABS_API_KEY"
+def test_ai33(key):
     if key:
-        save_keys(None, key if provider == "elevenlabs" else None, key if provider == "ai33" else None)
-    v = voices(provider)
-    if v and not v[0].startswith("(error"):
-        save_local({"voice": {"provider": provider}})  # jo test pass ho wahi provider ban jaye
+        save_keys(None, key)
+    v = voices()
     ok = v and not v[0].startswith("(error")
-    return f"✔ {provider} chal raha hai: {len(v)} voices" if ok else f"✖ {provider}: {v[0] if v else 'no voices'}", mask(env)
+    return (f"✔ AI33 Pro chal raha hai: {len(v)} voices mili" if ok else f"✖ AI33: {v[0] if v else 'koi voice nahi'}"), mask("AI33_API_KEY")
+
+
+def voice_search(q, src):
+    v = voices(q or "", "" if src == "sab" else src)
+    if v and v[0].startswith("(error"):
+        return gr.Dropdown(choices=[], value=None), v[0]
+    return gr.Dropdown(choices=v, value=v[0] if v else None), f"{len(v)} voices"
+
+
+def voice_preview(choice):
+    from docforge import tts
+    vid = _vid(choice)
+    url = tts.preview_url(vid) if vid else ""
+    return url or None
 
 
 def do_update():
@@ -192,11 +191,11 @@ def do_update():
 
 
 # settings
-def settings_save(provider, writer, auditor, w_eff, a_eff, voice, model_id, speed, quality, subs, crop_t, crop_b,
+def settings_save(writer, auditor, w_eff, a_eff, voice, model_id, speed, quality, subs, crop_t, crop_b,
                   grade, cards, tag, mvol, duck):
     save_local({
         "llm": {"writer_model": writer, "auditor_model": auditor, "writer_reasoning": w_eff, "auditor_reasoning": a_eff},
-        "voice": {"provider": provider, "voice": _vid(voice) or "", "model_id": model_id, "speed": float(speed)},
+        "voice": {"voice": _vid(voice) or "", "model_id": model_id, "speed": float(speed)},
         "video": {"quality": quality, "subtitles": bool(subs), "broll_crop": {"top": int(crop_t), "bottom": int(crop_b), "left": 0, "right": 0},
                   "broll_grade": bool(grade), "label_cards": bool(cards), "clip_tag": "ORIGINAL CLIP" if tag else ""},
         "music": {"volume_db": int(mvol), "duck": bool(duck)},
@@ -288,7 +287,7 @@ GR6 = int(gr.__version__.split(".")[0]) >= 6
 STYLE = {"css": CSS, "theme": THEME}
 with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
     with gr.Row():
-        gr.Markdown("# 🎬 Celeb Tool YT\nDark documentary pipeline · master prompt locked", elem_id="title")
+        gr.Markdown("# 🎬 Celeb Tool YT\nDark documentary pipeline · master prompt locked · DeepSeek + AI33 Pro + FFmpeg", elem_id="title")
         upd = gr.Button("⬆ Update tool", scale=0, size="sm")
     upd_msg = gr.Markdown()
 
@@ -316,7 +315,7 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
         rumor = gr.Textbox(label="🔥 Main rumor / idea (1 line), poori video isi ke gird", lines=2)
         with gr.Row():
             quality = gr.Radio(["1080p", "4k"], value=cfg["video"]["quality"], label="Quality")
-            voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="Voice (khaali = Settings wali)", allow_custom_value=True, scale=2)
+            voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="AI33 voice (khaali = Settings wali)", allow_custom_value=True, scale=2)
             vref = gr.Button("↻ Voices load", scale=0)
             subs = gr.Checkbox(label="Subtitles", value=cfg["video"]["subtitles"])
         add = gr.Button("➕ Add to Queue", variant="primary", size="lg")
@@ -388,11 +387,6 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
                 dkey = gr.Textbox(label="DEPLOY_API_KEY", type="password", placeholder="naya key paste karo")
                 dtest = gr.Button("Test Deploy (saare URLs check karta hai)")
             with gr.Column():
-                gr.Markdown("### ElevenLabs")
-                estat = gr.Markdown(mask("ELEVENLABS_API_KEY"))
-                ekey = gr.Textbox(label="ELEVENLABS_API_KEY", type="password", placeholder="naya key paste karo")
-                etest = gr.Button("Test ElevenLabs")
-            with gr.Column():
                 gr.Markdown("### AI33 Pro")
                 astat = gr.Markdown(mask("AI33_API_KEY"))
                 akey = gr.Textbox(label="AI33_API_KEY", type="password", placeholder="naya key paste karo")
@@ -410,10 +404,15 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
                 s_aeff = gr.Dropdown(["low", "high", "max"], value=cfg["llm"]["auditor_reasoning"], label="Auditor reasoning")
             with gr.Column():
                 gr.Markdown("### Voice")
-                s_prov = gr.Radio(["elevenlabs", "ai33"], value=_eff(), label="Voice provider")
-                s_voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="Default voice", allow_custom_value=True)
-                s_vref = gr.Button("↻ Voices load")
-                s_model = gr.Textbox(cfg["voice"]["model_id"], label="ElevenLabs model")
+                gr.Markdown("**AI33 Pro**")
+                with gr.Row():
+                    s_vq = gr.Textbox(label="Search", placeholder="jaise: deep male, narrator, british", scale=3)
+                    s_src = gr.Dropdown(["sab", "elevenlabs", "minimax"], value="sab", label="Source", scale=1)
+                s_vref = gr.Button("🔍 Voices dhoondo / load")
+                s_vcount = gr.Markdown()
+                s_voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="Default voice (ya voice_id paste karo)", allow_custom_value=True)
+                s_prev = gr.Audio(label="Preview sun lo", interactive=False)
+                s_model = gr.Dropdown(["eleven_multilingual_v2", "eleven_turbo_v2_5", "eleven_flash_v2_5"], value=cfg["voice"]["model_id"], label="AI33 voice model", allow_custom_value=True)
                 s_speed = gr.Slider(0.8, 1.2, value=cfg["voice"].get("speed", 1.0), step=0.01, label="Speed")
             with gr.Column():
                 gr.Markdown("### Video")
@@ -443,8 +442,10 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
 
     # wiring
     for btn, dd in ((vref, voice), (qref, qvoice)):
-        btn.click(lambda: gr.Dropdown(choices=voices(_eff())), None, dd)
-    s_vref.click(lambda p: gr.Dropdown(choices=voices(p)), s_prov, s_voice)
+        btn.click(lambda: gr.Dropdown(choices=voices()), None, dd)
+    s_vref.click(voice_search, [s_vq, s_src], [s_voice, s_vcount])
+    s_vq.submit(voice_search, [s_vq, s_src], [s_voice, s_vcount])
+    s_voice.change(voice_preview, s_voice, s_prev)
     upd.click(do_update, None, upd_msg)
     from docforge import styles as _st
     st_go.click(style_analyze, [st_l1, st_l2, st_l3, st_f, st_name], st_msg)
@@ -459,11 +460,10 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
     dbtn.click(delete_job, rjob, [qmsg, grid])
     oref.click(lambda: gr.Dropdown(choices=job_names()), None, ojob)
     ojob.change(load_output, ojob, [ovid, oscript, olog, oqa, opk, ofiles])
-    ksave.click(keys_save, [dkey, ekey, akey], [kmsg, dstat, estat, astat, dkey, ekey, akey])
+    ksave.click(keys_save, [dkey, akey], [kmsg, dstat, astat, dkey, akey])
     dtest.click(test_deploy, dkey, [kmsg, dstat])
-    etest.click(lambda k: test_voice("elevenlabs", k), ekey, [kmsg, estat])
-    atest.click(lambda k: test_voice("ai33", k), akey, [kmsg, astat])
-    ssave.click(settings_save, [s_prov, s_writer, s_aud, s_weff, s_aeff, s_voice, s_model, s_speed, s_q, s_subs, s_ct, s_cb,
+    atest.click(test_ai33, akey, [kmsg, astat])
+    ssave.click(settings_save, [s_writer, s_aud, s_weff, s_aeff, s_voice, s_model, s_speed, s_q, s_subs, s_ct, s_cb,
                                 s_grade, s_cards, s_tag, s_mvol, s_duck], smsg)
     m_up.upload(music_add, m_up, m_tbl)
     m_clr.click(music_clear, None, m_tbl)
