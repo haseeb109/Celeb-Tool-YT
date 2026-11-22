@@ -200,6 +200,8 @@ def queue_html(jobs, stages, labels):
         n = sum(1 for s in stages if s in done)
         pct = 100 if state == "done" else int(n / len(stages) * 100)
         cur = next((labels[i] for i, s in enumerate(stages) if s not in done), labels[-1])
+        if state == "failed" and st.get("failed_stage") in stages:
+            cur = labels[stages.index(st["failed_stage"])]
         meta = {"running": f"{cur} · {n}/{len(stages)}", "done": "Done", "failed": f"Ruki: {cur}", "pending": "Queued"}.get(state, state)
         chips = []
         for i, s in enumerate(stages):

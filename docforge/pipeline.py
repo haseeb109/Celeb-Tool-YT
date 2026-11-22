@@ -48,12 +48,14 @@ class Job:
 
     _mlock = __import__("threading").Lock()
 
-    def mark(self, stage=None, state=None, error=None):
+    def mark(self, stage=None, state=None, error=None, failed_stage=None):
         with self._mlock:
-            self._mark(stage, state, error)
+            self._mark(stage, state, error, failed_stage)
 
-    def _mark(self, stage=None, state=None, error=None):
+    def _mark(self, stage=None, state=None, error=None, failed_stage=None):
         s = self.status()
+        if state:
+            s["failed_stage"] = failed_stage if state == "failed" else None
         if stage and stage not in s["done"]:
             s["done"].append(stage)
         if state:
@@ -126,6 +128,7 @@ def run_job(path: Path, force_from=None, voice_override=None):
                 job.log("   b-roll collection khatam hone ka intezar…")
                 bg["t"].join()
             job.log(f"▶ {stage}")
+            cur_stage = stage
             if stage in ("plan", "write", "qa", "package") and llm is None:
                 llm = LLM(cfg, job.log)
             globals()[f"stage_{stage}"](job, cfg, ts, llm, voice_override=voice_override)
@@ -135,7 +138,7 @@ def run_job(path: Path, force_from=None, voice_override=None):
     except Exception as e:
         job.log("✖ " + "".join(traceback.format_exception_only(type(e), e)).strip())
         job.logf.write(traceback.format_exc())
-        job.mark(state="failed", error=str(e)[:500])
+        job.mark(state="failed", error=str(e)[:500], failed_stage=locals().get("cur_stage"))
         raise
     finally:
         if llm:

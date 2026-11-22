@@ -118,9 +118,13 @@ def validate_plan(plan, transcripts, cfg):
     if mclip_s > sc["montage_seconds"][1]:
         errs.append(f"montage clips total {mclip_s:.0f}s — the whole montage must fit in 30–45s (Section 3)")
     secs = plan.get("sections", [])
-    tot = sum(int(s.get("target_words", 0)) for s in secs)
-    if not (sc["min_words"] <= tot <= sc["max_words"]):
-        errs.append(f"section target_words sum {tot} outside {sc['min_words']}-{sc['max_words']}")
+    # target_words sirf planning hai; total range se bahar ho to yahin proportionally scale (asal word count write + QA enforce karte hain)
+    tot = sum(max(0, int(s.get("target_words", 0) or 0)) for s in secs)
+    if secs and not (sc["min_words"] <= tot <= sc["max_words"]):
+        goal = sc["target_words"]
+        for s in secs:
+            w = int(s.get("target_words", 0) or 0)
+            s["target_words"] = max(120, round((w if tot else goal / len(secs)) * goal / (tot or goal)))
     return errs
 
 
