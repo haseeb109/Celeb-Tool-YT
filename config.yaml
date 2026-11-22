@@ -60,6 +60,12 @@ video:
   sfx_gain_db: -6               # sound effects volume
   # Overlays abhi Pillow se bante hain (tez, Node ki zaroorat nahi). HyperFrames animated cards = phase 2.
 
+youtube:
+  # YouTube "Sign in to confirm you're not a bot" aaye to: jis browser mein YouTube login hai uska naam
+  # chrome | safari | firefox | brave | edge   (khaali = off). Safari ke liye Terminal ko Full Disk Access chahiye.
+  cookies_from_browser: ""
+  sleep_requests: 0.75      # requests ke beech waqfa (bot detection kam)
+
 broll:
   # AI voice ke neeche (hook ke baad) kya chale: internet | competitor | mix
   #   internet   = celebrity ki internet clips + animated photos (+ aapka folder)

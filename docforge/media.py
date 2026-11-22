@@ -46,14 +46,35 @@ def common_out(cfg, W):
 
 
 # ------------------------------------------------------------------ download
+def ytdlp_args():
+    """Sab yt-dlp calls ke common flags: browser cookies (bot check se bachne ke liye) + halka waqfa."""
+    from .config import load_config
+    yc = load_config().get("youtube", {}) or {}
+    a = []
+    if (yc.get("cookies_from_browser") or "").strip():
+        a += ["--cookies-from-browser", yc["cookies_from_browser"].strip()]
+    if float(yc.get("sleep_requests", 0) or 0) > 0:
+        a += ["--sleep-requests", str(yc["sleep_requests"])]
+    return a
+
+
+BOT_HINT = ("YouTube ne bot samjha — Settings → YouTube → 'Browser cookies' mein woh browser chuno jismein "
+            "YouTube login hai (jaise chrome), Save karo, phir job dobara chalao.")
+
+
 def download(link, out: Path, quality, log):
     if out.exists() and out.stat().st_size > 100_000:
         return out
     H = dims(quality)[1]
     fmt = f"bv*[height<={H}][vcodec^=avc1]+ba[ext=m4a]/bv*[height<={H}]+ba/b[height<={H}]/b"
     log(f"   yt-dlp ← {link}")
-    run(["yt-dlp", "-f", fmt, "--merge-output-format", "mp4", "--no-playlist", "-N", "8",
-         "--retries", "10", "--fragment-retries", "10", "-o", str(out), link])
+    try:
+        run(["yt-dlp", *ytdlp_args(), "-f", fmt, "--merge-output-format", "mp4", "--no-playlist", "-N", "8",
+             "--retries", "10", "--fragment-retries", "10", "-o", str(out), link])
+    except RuntimeError as e:
+        if "not a bot" in str(e) or "Sign in to confirm" in str(e):
+            raise RuntimeError(BOT_HINT) from e
+        raise
     return out
 
 

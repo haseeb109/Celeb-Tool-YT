@@ -223,7 +223,7 @@ def do_update():
 
 
 # settings
-def settings_save(b_src, b_n, b_days, b_img, b_dir, writer, auditor, w_eff, a_eff, voice, model_id, speed, quality, subs, crop_t, crop_b,
+def settings_save(y_ck, b_src, b_n, b_days, b_img, b_dir, writer, auditor, w_eff, a_eff, voice, model_id, speed, quality, subs, crop_t, crop_b,
                   grade, cards, tag, mvol, duck):
     save_local({
         "llm": {"writer_model": writer, "auditor_model": auditor, "writer_reasoning": w_eff, "auditor_reasoning": a_eff},
@@ -231,6 +231,7 @@ def settings_save(b_src, b_n, b_days, b_img, b_dir, writer, auditor, w_eff, a_ef
         "video": {"quality": quality, "subtitles": bool(subs), "broll_crop": {"top": int(crop_t), "bottom": int(crop_b), "left": 0, "right": 0},
                   "broll_grade": bool(grade), "label_cards": bool(cards), "clip_tag": "ORIGINAL CLIP" if tag else ""},
         "music": {"volume_db": int(mvol), "duck": bool(duck)},
+        "youtube": {"cookies_from_browser": y_ck or ""},
         "broll": {"source": b_src, "target_clips": int(b_n), "recent_days": int(b_days), "images": int(b_img),
                   "local_folder": (b_dir or "").strip()},
     })
@@ -314,7 +315,8 @@ def quick_download(url):
         return "✖ Link do"
     out = ROOT / load_config()["paths"]["output"] / "downloads"
     out.mkdir(parents=True, exist_ok=True)
-    p = subprocess.run(["yt-dlp", "-f", "bv*[vcodec^=avc1]+ba[ext=m4a]/bv*+ba/b", "--merge-output-format", "mp4", "-N", "8",
+    from docforge.media import ytdlp_args
+    p = subprocess.run(["yt-dlp", *ytdlp_args(), "-f", "bv*[vcodec^=avc1]+ba[ext=m4a]/bv*+ba/b", "--merge-output-format", "mp4", "-N", "8",
                         "--no-playlist", "-o", str(out / "%(title).80s [%(id)s].%(ext)s"), url.strip()],
                        capture_output=True, text=True)
     return f"✔ Saved in `{out}`" if p.returncode == 0 else f"✖ {(p.stderr or p.stdout)[-300:]}"
@@ -486,6 +488,10 @@ with gr.Blocks(title="Celeb Studio", **({} if GR6 else STYLE)) as ui:
                 b_img = gr.Slider(0, 30, value=cfg.get("broll", {}).get("images", 12), step=1, label="Photos (animated, Wikimedia)")
                 b_dir = gr.Textbox(cfg.get("broll", {}).get("local_folder", ""), label="Apna videos folder (optional, shuffle hoga)",
                                    placeholder="/Users/haseeb/Movies/keanu")
+                gr.Markdown("### ▶ YouTube")
+                y_ck = gr.Dropdown([("Off", ""), ("Chrome", "chrome"), ("Safari", "safari"), ("Firefox", "firefox"), ("Brave", "brave"), ("Edge", "edge")],
+                                   value=(cfg.get("youtube", {}) or {}).get("cookies_from_browser", ""),
+                                   label="Browser cookies — 'not a bot' error aaye to woh browser chuno jismein YouTube login hai")
             with gr.Column():
                 gr.Markdown("### 📥 Quick Download (MediaForge)")
                 qd_url = gr.Textbox(label="YouTube / Instagram / TikTok / X link")
@@ -535,7 +541,7 @@ with gr.Blocks(title="Celeb Studio", **({} if GR6 else STYLE)) as ui:
     dtest.click(test_deploy, dkey, [kmsg, dstat])
     atest.click(test_ai33, akey, [kmsg, astat])
     qd_go.click(quick_download, qd_url, qd_out)
-    ssave.click(settings_save, [b_src, b_n, b_days, b_img, b_dir, s_writer, s_aud, s_weff, s_aeff, s_voice, s_model, s_speed, s_q, s_subs, s_ct, s_cb,
+    ssave.click(settings_save, [y_ck, b_src, b_n, b_days, b_img, b_dir, s_writer, s_aud, s_weff, s_aeff, s_voice, s_model, s_speed, s_q, s_subs, s_ct, s_cb,
                                 s_grade, s_cards, s_tag, s_mvol, s_duck], smsg)
     m_up.upload(music_add, m_up, m_tbl)
     m_clr.click(music_clear, None, m_tbl)

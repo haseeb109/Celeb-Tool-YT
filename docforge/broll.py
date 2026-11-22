@@ -40,8 +40,9 @@ VIDEO_EXT = (".mp4", ".mov", ".mkv", ".webm", ".m4v")
 
 
 def _yt(args, timeout=900):
+    from .media import ytdlp_args
     exe = shutil.which("yt-dlp") or "yt-dlp"
-    p = subprocess.run([exe, "--ignore-config", "--no-warnings", "--no-progress", "--socket-timeout", "20",
+    p = subprocess.run([exe, "--ignore-config", "--no-warnings", "--no-progress", "--socket-timeout", "20", *ytdlp_args(),
                         "--retries", "5", "--fragment-retries", "5", *args], capture_output=True, text=True, timeout=timeout)
     if p.returncode != 0:
         raise RuntimeError((p.stderr or p.stdout)[-400:])
@@ -235,6 +236,7 @@ def collect(job, cfg, transcripts, llm, log):
     per_src = int(bc.get("max_per_source", 3))
     lengths = [int(x) for x in bc.get("clip_lengths", [5, 8, 10])]
     pool, lock = [], threading.Lock()
+    bot_hits = [0]
 
     subject, queries = subject_and_queries(llm, job.spec, transcripts, job.spec.get("subject", ""))
     vision = Vision(llm, cfg, log)
@@ -292,7 +294,13 @@ def collect(job, cfg, transcripts, llm, log):
                     got += 1
             log(f"   ✔ {got} clip(s): {e['title'][:70]}")
         except Exception as ex:
-            log(f"   ⚠ source skip ({str(ex)[:120]}): {e['title'][:60]}")
+            msg = str(ex)
+            if "not a bot" in msg or "Sign in to confirm" in msg:
+                bot_hits[0] += 1
+                if bot_hits[0] == 1:
+                    from .media import BOT_HINT
+                    log(f"   ⚠ {BOT_HINT}")
+            log(f"   ⚠ source skip ({msg[:120]}): {e['title'][:60]}")
         finally:
             if not bc.get("keep_previews", False):
                 (sw / "preview.mp4").unlink(missing_ok=True)
