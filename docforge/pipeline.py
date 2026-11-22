@@ -363,36 +363,60 @@ def stage_visuals(job, cfg, ts, llm, **_):
         job.log("   ⚠ b-roll pool khali → competitor footage use ho rahi hai")
     else:
         job.log(f"   b-roll: {len(vids)} clips + {len(imgs)} photos (mode: {mode})")
-    order = {"i": 0, "seq": []}
     img_ratio = float(cfg.get("broll", {}).get("image_ratio", 0.2))
+    seg_len = max(1.2, float((prof or {}).get("pacing", {}).get("p75_shot_s", 3.5)))
+    # har video ko scenes → chhote tukdon mein baanto; har tukda poori video mein SIRF EK DAFA
+    by_src = []
+    for a in vids:
+        segs = []
+        for sa, sb in (a.get("scenes") or [(0.0, a["dur"])]):
+            pos = sa + 0.12
+            while sb - pos >= 1.0:
+                L = min(_shot_len(prof, rng), sb - pos - 0.05)  # tukda = ek shot, poora istemal hota hai
+                segs.append((a, pos, L))
+                pos += L
+        rng.shuffle(segs)
+        by_src.append(segs)
+    seg_q = []
+    while any(by_src):  # round-robin: lagatar do shots ek hi video se nahi
+        for lst in by_src:
+            if lst:
+                seg_q.append(lst.pop())
+    img_q = imgs[:]
+    rng.shuffle(img_q)
+    uniq_s = sum(x[2] for x in seg_q) + 4.0 * len(img_q)
+    if vids or imgs:
+        need_s = sum(media.duration(x["vo"]) + 0.35 for sec in script["sections"] for x in sec["segments"] if x["type"] == "narration")
+        job.log(f"   b-roll unique footage: {uniq_s / 60:.1f} min ({len(seg_q)} tukde, {len(img_q)} photos) · AI voice: {need_s / 60:.1f} min — har tukda sirf ek dafa")
+        eff = uniq_s * 0.85  # har voice block ke aakhir mein thodi footage trim hoti hai
+        if eff < need_s and vids:
+            per = eff / max(1, len(vids))
+            more = int((need_s - eff) / max(per, 30)) + 1
+            job.log(f"   ⚠ footage kam hai: ~{(need_s - eff) / 60:.1f} min ki kami — takreeban {more} aur links do (warna kami competitor footage se poori hogi, repeat nahi)")
+    warned = [False]
 
-    def next_vid():
-        if not order["seq"]:
-            order["seq"] = vids[:]
-            rng.shuffle(order["seq"])
-        return order["seq"].pop()
-
-    def pool_shots(need):
-        out, acc, last = [], 0.0, None
+    def pool_shots(need, fallback):
+        out, acc = [], 0.0
         while acc < need + 0.5:
-            if imgs and (not vids or rng.random() < img_ratio):
-                a = rng.choice(imgs)
-                L = min(a["dur"], max(3.5, _shot_len(prof, rng) + 1.0))
+            if img_q and (not seg_q or rng.random() < img_ratio):
+                a = img_q.pop()
+                L = min(a["dur"], max(3.0, _shot_len(prof, rng) + 0.8))
                 fx = _fx(prof, rng, L)
                 fx.update(zoom=0.0, pan=0.0, nocrop=True)  # photo pehle se animated hai
                 out.append((Path(a["path"]), 0.0, L, fx))
-            else:
-                a = next_vid()
-                if a is last and len(vids) > 1:
-                    a = next_vid()
-                L = min(_shot_len(prof, rng), a["dur"] - 0.1)
-                st = rng.uniform(0, max(0.0, a["dur"] - L - 0.05))
+            elif seg_q:
+                a, st, L = seg_q.pop(0)
                 fx = _fx(prof, rng, L)
                 fx["nocrop"] = True
                 if a.get("h", 9) > a.get("w", 16) * 0.9:
                     fx["fit"] = "blur"
                 out.append((Path(a["path"]), st, L, fx))
-            last = a
+            else:  # unique b-roll khatam → competitor footage (repeat nahi karte)
+                if not warned[0]:
+                    job.log("   ⚠ b-roll ki unique footage khatam — baaqi hisse mein competitor footage. Zyada links do to ye nahi hoga.")
+                    warned[0] = True
+                out += fallback
+                break
             acc += out[-1][2]
         return out
     for si, sec in enumerate(script["sections"]):
@@ -412,7 +436,7 @@ def stage_visuals(job, cfg, ts, llm, **_):
                 shots = [(a, b_, _shot_len(prof, rng), _fx(prof, rng, 3)) for a, b_, _ in _fallback_shots(job, ts, clip_ranges, k)]
             if vids or imgs:  # internet b-roll under the AI voice
                 need = media.duration(s["vo"]) + 0.35
-                ps = pool_shots(need)
+                ps = pool_shots(need, shots)
                 if mode == "mix":  # ~30% competitor footage beech mein
                     mixed, ci = [], 0
                     for sh in ps:
@@ -438,6 +462,7 @@ def stage_visuals(job, cfg, ts, llm, **_):
                                            look=prof.get("look") if prof else None,
                                            grade=prof.get("grade") if prof else None)
         s["seg"], s["seg_dur"], s["cuts"] = str(out), tot, cuts
+        s["broll_used"] = [[str(x[0]), round(x[1], 2), round(x[2], 2)] for x in shots]
     done = [0]
 
     def render_logged(t):

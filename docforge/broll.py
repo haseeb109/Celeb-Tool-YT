@@ -225,8 +225,61 @@ def animate_image(img, out, W, H, seconds=6.0, zoom_in=True, fps=30):
     return out
 
 
+# ------------------------------------------------------------------ user links (YouTube / Instagram / TikTok)
+def _scenes(path, dur):
+    try:
+        from .style import detect_cuts
+        sc = detect_cuts(path)
+        return [(round(a, 2), round(b, 2)) for a, b in sc if b - a >= 1.0] or [(0.0, dur)]
+    except Exception:
+        return [(0.0, dur)]
+
+
+def collect_links(job, cfg, links, log):
+    """Sirf aapke diye hue links: download → scenes detect → pool. Koi search nahi, koi photo nahi."""
+    work = job.work / "broll"
+    work.mkdir(exist_ok=True)
+    H = job.H
+    pool, lock = [], threading.Lock()
+
+    def one(item):
+        i, url = item
+        out = work / f"link_{i:02d}.mp4"
+        try:
+            if not out.exists() or out.stat().st_size < 10000:
+                _yt(["-f", f"bv*[height<={H}]+ba/b[height<={H}]/bv*+ba/b", "--merge-output-format", "mp4", "-N", "4",
+                     "--no-playlist", "-o", str(out), url], timeout=1800)
+            dur = media_duration(out)
+            w, h = _dims(out)
+            sc = _scenes(out, dur)
+            with lock:
+                pool.append({"kind": "clip", "path": str(out), "dur": dur, "w": w, "h": h, "url": url,
+                             "title": url, "channel": "", "scenes": sc, "order": i})
+            log(f"   ✔ link {i + 1}: {dur:.0f}s · {len(sc)} scenes")
+        except Exception as ex:
+            msg = str(ex)
+            if "not a bot" in msg or "Sign in to confirm" in msg or "login" in msg.lower():
+                from .media import BOT_HINT
+                log(f"   ⚠ link {i + 1} skip — login/bot check. {BOT_HINT}")
+            else:
+                log(f"   ⚠ link {i + 1} skip ({msg[:140]})")
+
+    log(f"   b-roll: sirf aapke {len(links)} links se (search off)")
+    with ThreadPoolExecutor(max_workers=int(cfg.get("broll", {}).get("parallel", 3))) as ex:
+        list(ex.map(one, list(enumerate(links))))
+    pool.sort(key=lambda p: p["order"])
+    total = sum(p["dur"] for p in pool)
+    log(f"   b-roll pool: {len(pool)}/{len(links)} videos · {total / 60:.1f} min footage")
+    data = {"subject": job.spec.get("subject", ""), "queries": [], "pool": pool, "mode": "links"}
+    (work / "pool.json").write_text(json.dumps(data, indent=2))
+    return data
+
+
 # ------------------------------------------------------------------ main
 def collect(job, cfg, transcripts, llm, log):
+    links = [l.strip() for l in (job.spec.get("broll_links") or []) if l and l.strip().startswith("http")]
+    if links:
+        return collect_links(job, cfg, links, log)
     bc = cfg.get("broll", {})
     work = job.work / "broll"
     work.mkdir(exist_ok=True)

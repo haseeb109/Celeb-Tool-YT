@@ -88,11 +88,11 @@ def tail():
 
 
 # ------------------------------------------------------------------ actions
-def add_job(name, l1, t1, f1, l2, t2, f2, rumor, subject, quality, voice, subs):
+def add_job(name, l1, t1, f1, l2, t2, f2, rumor, subject, blinks, quality, voice, subs):
     t1, t2 = read_txt(f1, t1), read_txt(f2, t2)
     if not (l1.strip() and t1.strip() and rumor.strip()):
         return "✖ Link 1, Transcript 1 aur Rumor zaroori hain", queue_cards()
-    d = create_job(name, l1, t1, l2, t2, rumor, quality, _vid(voice), subs, subject)
+    d = create_job(name, l1, t1, l2, t2, rumor, quality, _vid(voice), subs, subject, blinks)
     return f"✔ Queue mein add: **{d.name}**", queue_cards()
 
 
@@ -367,6 +367,8 @@ with gr.Blocks(title="Celeb Studio", **({} if GR6 else STYLE)) as ui:
         rumor = gr.Textbox(label="🔥 Main rumor / idea (1 line), poori video isi ke gird", lines=2)
         subject = gr.Textbox(label="🎯 Celebrity name — AI voice ke neeche isi ki internet clips aur photos aayengi (khaali = AI khud nikalega)",
                              placeholder="jaise: Keanu Reeves")
+        blinks = gr.Textbox(label="🎞 B-roll source links — har line mein ek link (YouTube / Instagram reel / TikTok). Sirf inhi se b-roll banega, har clip sirf ek dafa. Khaali = auto search",
+                            lines=6, placeholder="https://www.youtube.com/watch?v=...\nhttps://www.instagram.com/reel/...\nhttps://www.tiktok.com/@user/video/...")
         with gr.Row():
             quality = gr.Radio(["1080p", "4k"], value=cfg["video"]["quality"], label="Quality")
             voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="AI33 voice (khaali = Settings wali)", allow_custom_value=True, scale=2)
@@ -531,7 +533,7 @@ with gr.Blocks(title="Celeb Studio", **({} if GR6 else STYLE)) as ui:
     st_lock.click(style_lock, st_pick, [st_lmsg, st_status])
     st_unlock.click(style_unlock, None, [st_lmsg, st_status])
     ui.load(lambda: gr.Dropdown(choices=_st.list_styles(), value=_st.locked() or None), None, st_pick)
-    add.click(add_job, [name, l1, t1, f1, l2, t2, f2, rumor, subject, quality, voice, subs], [add_msg, grid])
+    add.click(add_job, [name, l1, t1, f1, l2, t2, f2, rumor, subject, blinks, quality, voice, subs], [add_msg, grid])
     go.click(start_queue, qvoice, qmsg)
     rbtn.click(rerun, [rjob, rstage, qvoice], qmsg)
     dbtn.click(delete_job, rjob, [qmsg, grid])
