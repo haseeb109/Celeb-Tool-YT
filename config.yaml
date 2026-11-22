@@ -44,6 +44,7 @@ voice:
 video:
   quality: 1080p            # 1080p | 4k   (job.yaml mein override ho sakta hai)
   fps: 30
+  parallel_jobs: 3          # ek saath kitne FFmpeg render (M1 Pro 16GB: 3 theek). Mac garam ho/slow ho to 2
   encoder: auto             # auto = Mac par h264_videotoolbox, warna libx264
   subtitles: false          # optional burned-in subtitles
   # Competitor videos mein burned subtitles / logo hon to b-roll se crop kar do (percent)

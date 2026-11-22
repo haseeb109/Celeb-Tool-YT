@@ -8,9 +8,16 @@ from .transcript import fmt
 CARD_KINDS = ["CONFIRMED", "ALLEGED", "RUMOR", "SPECULATION", "CLAIM", "QUOTE", "DATE", "NONE"]
 
 
-def system_prompt(cfg):
+INPUTS_REF = "(the full inputs — main rumor + both transcripts — are in the system message under INPUTS)"
+
+
+def system_prompt(cfg, job=None, transcripts=None):
+    """Same prefix for every writer call (master prompt + inputs) so the provider's prompt cache hits."""
     adapter = (ROOT / "prompts" / "pipeline_adapter.md").read_text()
-    return adapter.replace("{MASTER_PROMPT}", master_prompt_text(cfg))
+    s = adapter.replace("{MASTER_PROMPT}", master_prompt_text(cfg))
+    if job is not None and transcripts is not None:
+        s += "\n\nINPUTS\n" + inputs_block(job, transcripts)
+    return s
 
 
 def inputs_block(job, transcripts):
@@ -60,8 +67,8 @@ INPUTS
 def make_plan(llm, cfg, job, transcripts, log):
     sc = cfg["script"]
     user = PLAN_TASK.format(target=sc["target_words"], lo=sc["min_words"], hi=sc["max_words"],
-                            inputs=inputs_block(job, transcripts))
-    sysm = system_prompt(cfg)
+                            inputs=INPUTS_REF)
+    sysm = system_prompt(cfg, job, transcripts)
     for attempt in range(3):
         plan = llm.json("writer", sysm, user)
         errs = validate_plan(plan, transcripts, cfg)
@@ -206,9 +213,9 @@ def outline_text(plan):
 def write_montage(llm, cfg, job, transcripts, plan, clips):
     ids = [c for c in clips if clips[c]["montage"]]
     user = MONTAGE_TASK.format(order=", ".join(ids), clipinfo=_clipinfo(clips, ids),
-                               angle=plan.get("core_angle", ""), inputs=inputs_block(job, transcripts),
+                               angle=plan.get("core_angle", ""), inputs=INPUTS_REF,
                                **montage_budget(cfg, clips, ids))
-    return llm.json("writer", system_prompt(cfg), user)["segments"]
+    return llm.json("writer", system_prompt(cfg, job, transcripts), user)["segments"]
 
 
 def montage_budget(cfg, clips, ids):
@@ -227,8 +234,8 @@ def write_section(llm, cfg, job, transcripts, plan, clips, sec, prev_text, extra
         clipinfo=_clipinfo(clips, sec["clip_ids"]),
         facts="\n".join(f"- [{f.get('status')}] {f.get('claim')} ({f.get('basis')})" for f in sec.get("facts", [])) or "-",
         prev=prev_text[-1500:] or "(this is the first body section; the montage transition just ended)",
-        outline=outline_text(plan), extra=extra, inputs=inputs_block(job, transcripts))
-    return llm.json("writer", system_prompt(cfg), user)["segments"]
+        outline=outline_text(plan), extra=extra, inputs=INPUTS_REF)
+    return llm.json("writer", system_prompt(cfg, job, transcripts), user)["segments"]
 
 
 def clean_segments(segs, allowed_refs, transcripts):

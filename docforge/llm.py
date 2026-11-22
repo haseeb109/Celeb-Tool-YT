@@ -17,6 +17,8 @@ class LLM:
         self.c = c
         self.log = log
         self.usage = {"prompt": 0, "completion": 0}
+        import threading
+        self._lock = threading.Lock()
 
     def _call(self, model, effort, system, user, temperature):
         r = self.client.chat.completions.create(
@@ -29,8 +31,11 @@ class LLM:
             },
         )
         if r.usage:
-            self.usage["prompt"] += r.usage.prompt_tokens or 0
-            self.usage["completion"] += r.usage.completion_tokens or 0
+            with self._lock:
+                self.usage["prompt"] += r.usage.prompt_tokens or 0
+                self.usage["completion"] += r.usage.completion_tokens or 0
+                det = getattr(r.usage, "prompt_tokens_details", None)
+                self.usage["cached"] = self.usage.get("cached", 0) + ((getattr(det, "cached_tokens", 0) or 0) if det else 0)
         return r.choices[0].message.content or ""
 
     def json(self, role, system, user, temperature=None):
@@ -56,9 +61,18 @@ def parse_json(raw):
     raw = re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip())
     start = raw.find("{")
     end = raw.rfind("}")
-    if start < 0 or end < 0:
+    if start < 0:
         raise ValueError("no JSON object in response")
-    return json.loads(raw[start:end + 1])
+    body = raw[start:end + 1] if end > start else raw[start:]
+    try:
+        return json.loads(body)
+    except json.JSONDecodeError:
+        # model ka JSON thoda toota (missing comma etc.) → repair karo, poori call dobara nahi
+        from json_repair import loads as repair
+        fixed = repair(body)
+        if not isinstance(fixed, dict) or not fixed:
+            raise
+        return fixed
 
 
 DEPLOY_BASES = ["https://api.deploy.com/api/v1", "https://api-sf1.deploy.com/api/v1", "https://api-va1.deploy.com/api/v1"]

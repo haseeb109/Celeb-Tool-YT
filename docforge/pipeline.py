@@ -2,6 +2,7 @@
 import csv
 import json
 import random
+from concurrent.futures import ThreadPoolExecutor
 import time
 import traceback
 from pathlib import Path
@@ -16,6 +17,7 @@ from .script_engine import (clean_segments, make_plan, narration_words, register
                             write_montage, write_section, clip_log_rows)
 from .transcript import Transcript, fmt
 
+WORKERS = 3  # parallel FFmpeg jobs (M1 Pro: 3 safe; videotoolbox ke saath)
 STAGES = ["ingest", "style", "plan", "write", "qa", "clips", "voice", "visuals", "assemble", "package"]
 
 
@@ -82,6 +84,8 @@ class Job:
 def run_job(path: Path, force_from=None, voice_override=None):
     cfg = load_config()
     master_prompt_text(cfg)  # lock check before spending anything
+    global WORKERS
+    WORKERS = int(cfg["video"].get("parallel_jobs", 3))
     job = Job(Path(path), cfg)
     if force_from:
         job.reset_from(force_from)
@@ -118,10 +122,11 @@ def srcfile(job, n):
 # ------------------------------------------------------------------ stages
 def stage_ingest(job, cfg, ts, llm, **_):
     for t in ts:
-        link = job.spec.get(f"link{t.src}")
-        if not link:
+        if not job.spec.get(f"link{t.src}"):
             raise RuntimeError(f"link{t.src} job.yaml mein nahi")
-        media.download(link, srcfile(job, t.src), job.quality, job.log)
+    with ThreadPoolExecutor(max_workers=2) as ex:  # dono videos ek saath download
+        list(ex.map(lambda t: media.download(job.spec[f"link{t.src}"], srcfile(job, t.src), job.quality, job.log), ts))
+    for t in ts:
         d = media.duration(srcfile(job, t.src))
         last = t.lines[-1].start
         if last > d + 5:
@@ -234,16 +239,21 @@ def stage_clips(job, cfg, ts, llm, **_):
     if cfg["video"]["clip_tag"]:
         tag = overlays.clip_tag(cfg["video"]["clip_tag"], job.W, job.H, job.work / "clip_tag.png", ROOT / cfg["paths"]["fonts"])
     used = {s["ref"] for sec in script["sections"] for s in sec["segments"] if s["type"] == "clip"}
-    for cid in used:
+    prof = _profile(job)
+    tr = prof.get("transitions", {})
+    for cid in used:  # word-level edges (whisper, GPU) — ek ek karke
         c = script["clips"][cid]
         st, en, how = media.refine_edges(srcfile(job, c["src"]), c["start"], c["end"], c["quote"], job.work, job.log)
         c["cut_start"], c["cut_end"], c["edge_source"] = st, en, how
-        prof = _profile(job)
-        tr = prof.get("transitions", {})
+
+    def cut(cid):
+        c = script["clips"][cid]
         trans = random.Random(cid + job.id).choices(list(tr), weights=list(tr.values()))[0] if tr and sum(tr.values()) else "cut"
-        media.cut_clip(srcfile(job, c["src"]), st, en, d / f"{cid}.mp4", cfg, job.W, job.H, tag, trans,
+        media.cut_clip(srcfile(job, c["src"]), c["cut_start"], c["cut_end"], d / f"{cid}.mp4", cfg, job.W, job.H, tag, trans,
                        prof.get("clip_frame", "pad"))
-        job.log(f"   {cid} T{c['src']} {fmt(st)}–{fmt(en)} ({en - st:.1f}s, {how})")
+        job.log(f"   {cid} T{c['src']} {fmt(c['cut_start'])}–{fmt(c['cut_end'])} ({c['cut_end'] - c['cut_start']:.1f}s, {c['edge_source']})")
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:  # FFmpeg cuts parallel
+        list(ex.map(cut, sorted(used)))
     job.j("script.json", script)
 
 
@@ -261,12 +271,13 @@ def stage_voice(job, cfg, ts, llm, voice_override=None, **_):
     d = job.work / "voice"
     d.mkdir(exist_ok=True)
     narr = [(si, gi, s) for si, sec in enumerate(script["sections"]) for gi, s in enumerate(sec["segments"]) if s["type"] == "narration"]
-    for k, (si, gi, s) in enumerate(narr):
+    def say(item):
+        si, gi, s = item
         out = d / f"n_{si:02d}_{gi:02d}.mp3"
-        prev = narr[k - 1][2]["text"] if k else ""
-        nxt = narr[k + 1][2]["text"] if k + 1 < len(narr) else ""
-        s["align"] = tts.synth(s["text"], vid, cfg["voice"], out, prev, nxt, ROOT / ".cache" / "tts")
+        s["align"] = tts.synth(s["text"], vid, cfg["voice"], out, "", "", ROOT / ".cache" / "tts")
         s["vo"] = str(out)
+    with ThreadPoolExecutor(max_workers=6) as ex:  # AI33 tasks ek saath (rate limit 10/s)
+        list(ex.map(say, narr))
     job.log(f"   {len(narr)} voiceover blocks")
     lo, hi = cfg["script"]["runtime_minutes"]
     clips_s = sum(c.get("cut_end", c["end"]) - c.get("cut_start", c["start"])
@@ -279,10 +290,9 @@ def stage_voice(job, cfg, ts, llm, voice_override=None, **_):
         sp = max(0.8, min(1.15, sp))
         job.log(f"   runtime 17–20 min se bahar → voice speed {sp:.2f} par dobara")
         cfg["voice"]["speed"] = sp
-        for k, (si, gi, s) in enumerate(narr):
-            prev = narr[k - 1][2]["text"] if k else ""
-            nxt = narr[k + 1][2]["text"] if k + 1 < len(narr) else ""
-            s["align"] = tts.synth(s["text"], vid, cfg["voice"], Path(s["vo"]), prev, nxt, ROOT / ".cache" / "tts")
+        with ThreadPoolExecutor(max_workers=6) as ex:
+            list(ex.map(lambda it: it[2].update(align=tts.synth(it[2]["text"], vid, cfg["voice"], Path(it[2]["vo"]), "", "",
+                                                                 ROOT / ".cache" / "tts")), narr))
         total = sum(media.duration(s["vo"]) + 0.35 for _, _, s in narr) + clips_s
         job.log(f"   new runtime: {fmt(total)}")
     if not (lo * 60 <= total <= hi * 60):
@@ -311,7 +321,7 @@ def stage_visuals(job, cfg, ts, llm, **_):
     clip_ranges = [(c["src"], c["start"], c["end"]) for c in script["clips"].values()]
     prof = _profile(job)
     rng = random.Random(job.id)
-    k = 0
+    k, tasks = 0, []
     for si, sec in enumerate(script["sections"]):
         for gi, s in enumerate(sec["segments"]):
             if s["type"] != "narration":
@@ -320,8 +330,6 @@ def stage_visuals(job, cfg, ts, llm, **_):
             shots = []
             for b in s.get("broll", []):
                 st, en, _, _ = tm[b["src"]].span(b["lines"])
-                dur = en - st
-                # long ranges → several 3–5s shots for pacing
                 pos = st
                 while pos < en - 0.8:
                     L = min(_shot_len(prof, rng), en - pos)
@@ -335,12 +343,24 @@ def stage_visuals(job, cfg, ts, llm, **_):
             if use_cards and s.get("card"):
                 card = overlays.label_card(s["card"]["kind"].upper(), s["card"]["text"], job.W, job.H,
                                            job.work / f"card_{si:02d}_{gi:02d}.png", fonts, tstyle)
-            _, tot, cuts = media.broll_segment(shots, Path(s["vo"]), out, cfg, job.W, job.H, card,
-                                               look=prof.get("look") if prof else None,
-                                               grade=prof.get("grade") if prof else None)
-            s["seg"], s["seg_dur"], s["cuts"] = str(out), tot, cuts
+            tasks.append((s, shots, out, card))
             k += 1
-        job.log(f"   visuals {sec['id']} ready")
+
+    def render(t):
+        s, shots, out, card = t
+        _, tot, cuts = media.broll_segment(shots, Path(s["vo"]), out, cfg, job.W, job.H, card,
+                                           look=prof.get("look") if prof else None,
+                                           grade=prof.get("grade") if prof else None)
+        s["seg"], s["seg_dur"], s["cuts"] = str(out), tot, cuts
+    done = [0]
+
+    def render_logged(t):
+        render(t)
+        done[0] += 1
+        if done[0] % 10 == 0 or done[0] == len(tasks):
+            job.log(f"   visuals {done[0]}/{len(tasks)} segments")
+    with ThreadPoolExecutor(max_workers=WORKERS) as ex:  # segments parallel render
+        list(ex.map(render_logged, tasks))
     job.j("script.json", script)
 
 

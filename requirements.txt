@@ -2,6 +2,7 @@ openai>=1.40
 requests
 pyyaml
 rapidfuzz
+json-repair
 pillow
 python-docx
 gradio>=5.0

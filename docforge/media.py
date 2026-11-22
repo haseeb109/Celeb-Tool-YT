@@ -52,7 +52,8 @@ def download(link, out: Path, quality, log):
     H = dims(quality)[1]
     fmt = f"bv*[height<={H}][vcodec^=avc1]+ba[ext=m4a]/bv*[height<={H}]+ba/b[height<={H}]/b"
     log(f"   yt-dlp ← {link}")
-    run(["yt-dlp", "-f", fmt, "--merge-output-format", "mp4", "--no-playlist", "-o", str(out), link])
+    run(["yt-dlp", "-f", fmt, "--merge-output-format", "mp4", "--no-playlist", "-N", "8",
+         "--retries", "10", "--fragment-retries", "10", "-o", str(out), link])
     return out
 
 

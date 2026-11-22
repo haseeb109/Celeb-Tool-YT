@@ -86,7 +86,8 @@ INPUTS
 
 
 def phase2(llm, cfg, job, transcripts, script):
-    sysm = "You are a strict script compliance auditor.\n\n=== LOCKED MASTER PROMPT ===\n" + master_prompt_text(cfg)
+    sysm = ("You are a strict script compliance auditor.\n\n=== LOCKED MASTER PROMPT ===\n" + master_prompt_text(cfg)
+            + "\n\nINPUTS\n" + inputs_block(job, transcripts))
     md = render_markdown(script)
     md_numbered = md
     for sec in script["sections"]:  # tag headings with section ids so the auditor can point at them
@@ -94,7 +95,7 @@ def phase2(llm, cfg, job, transcripts, script):
         md_numbered = md_numbered.replace(f"## {h}", f"## [{sec['id']}] {h}", 1)
     md_numbered = md_numbered.replace("## OPENING HIGH-IMPACT", "## [S0] OPENING HIGH-IMPACT", 1)
     r = llm.json("auditor", sysm, AUDIT_TASK.format(script=md_numbered.split("# CLIP LOG")[0],
-                                                     inputs=inputs_block(job, transcripts)), temperature=0.2)
+                                                     inputs="(in the system message under INPUTS)"), temperature=0.2)
     return r.get("issues", [])
 
 
@@ -135,29 +136,37 @@ def fix_issues(llm, cfg, job, transcripts, script, plan, majors, log):
         else:
             by_sec.setdefault(i["section"], []).append(i)
     plan_secs = {s["id"]: s for s in plan["sections"]}
+    prev_text = {}
     for idx, sec in enumerate(script["sections"]):
-        if sec["id"] not in by_sec:
-            continue
+        prev_text[sec["id"]] = " ".join(x["text"] for x in script["sections"][idx - 1]["segments"]
+                                        if x["type"] == "narration") if idx > 0 else ""
+
+    def fix_one(sec):
         probs = "\n".join(f"- {p['problem']} → FIX: {p['fix']}" for p in by_sec[sec["id"]])
         current = json.dumps(sec["segments"], ensure_ascii=False)
         extra = f"\nREVISION: this section already exists. Rewrite it fixing these QA problems; keep everything that was fine.\n{probs}\nCURRENT VERSION:\n{current}\n"
-        prev = ""
-        if idx > 0:
-            prev = " ".join(s["text"] for s in script["sections"][idx - 1]["segments"] if s["type"] == "narration")
+        prev = prev_text[sec["id"]]
         log(f"   fixing {sec['id']} ({len(by_sec[sec['id']])} problems)")
         if sec["id"] == "S0":
-            from .script_engine import MONTAGE_TASK, _clipinfo, montage_budget, system_prompt
+            from .script_engine import INPUTS_REF, MONTAGE_TASK, _clipinfo, montage_budget, system_prompt
             ids = [s["ref"] for s in sec["segments"] if s["type"] == "clip"] or [c for c in script["clips"] if script["clips"][c]["montage"]]
             user = MONTAGE_TASK.format(order=", ".join(ids), clipinfo=_clipinfo(script["clips"], ids),
-                                       angle=plan.get("core_angle", ""), inputs=inputs_block(job, transcripts),
+                                       angle=plan.get("core_angle", ""), inputs=INPUTS_REF,
                                        **montage_budget(cfg, script["clips"], ids)) + extra
-            segs = llm.json("writer", system_prompt(cfg), user)["segments"]
+            segs = llm.json("writer", system_prompt(cfg, job, transcripts), user)["segments"]
             allowed = ids
         else:
             ps = dict(plan_secs[sec["id"]])
             ps["target_words"] = sec.pop("_target", ps["target_words"])
             segs = write_section(llm, cfg, job, transcripts, plan, script["clips"], ps, prev, extra)
             allowed = ps["clip_ids"]
+        return sec, segs, allowed
+
+    from concurrent.futures import ThreadPoolExecutor
+    todo = [sec for sec in script["sections"] if sec["id"] in by_sec]
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        results = list(ex.map(fix_one, todo))
+    for sec, segs, allowed in results:
         new, missing = clean_segments(segs, allowed, transcripts)
         if new:
             sec["segments"] = new
