@@ -95,12 +95,19 @@ def refine_edges(src, start, end, quote, work: Path, log):
 
 
 # ------------------------------------------------------------------ segments
-def cut_clip(src, start, end, out: Path, cfg, W, H, tag_png=None, trans="cut"):
+def cut_clip(src, start, end, out: Path, cfg, W, H, tag_png=None, trans="cut", frame="pad"):
     dur = end - start
     inputs = ["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src)]
-    vf = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
-          f"setsar=1,fps={cfg['video']['fps']}"
-          + (",fade=t=in:st=0:d=0.18:color=white" if trans == "flash" else ",fade=t=in:st=0:d=0.3:color=black" if trans == "dip_to_black" else "")
+    if frame == "blur_fill":  # vertical/odd-ratio clips: blurred copy of itself behind (style 1)
+        vf = (f"[0:v]split=2[bg][fg];[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=28:2,eq=brightness=-0.08[bgb];"
+              f"[fg]scale={W}:{H}:force_original_aspect_ratio=decrease[fgs];[bgb][fgs]overlay=(W-w)/2:(H-h)/2,"
+              f"setsar=1,fps={cfg['video']['fps']}")
+    else:
+        vf = (f"[0:v]scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2:black,"
+              f"setsar=1,fps={cfg['video']['fps']}")
+    vf = (vf
+          + (",fade=t=in:st=0:d=0.18:color=white" if trans == "flash" else ",fade=t=in:st=0:d=0.3:color=black" if trans == "dip_to_black"
+             else ",rgbashift=rh=10:bh=-10:gv=4:enable='lt(t,0.16)'" if trans == "glitch" else "")
           + "[v0]")
     last = "v0"
     if tag_png:
@@ -131,6 +138,8 @@ def _shot_chain(n, src_i, d, fx, cfg, W, H, cw, ch, c):
         f += ",fade=t=in:st=0:d=0.18:color=white"
     elif tr == "dip_to_black":
         f += ",fade=t=in:st=0:d=0.3:color=black"
+    elif tr == "glitch":
+        f += ",rgbashift=rh=10:bh=-10:gv=4:enable='lt(t,0.16)',noise=alls=35:allf=t:enable='lt(t,0.16)'"
     return f + f",scale={W}:{H},setsar=1,format=yuv420p[s{n}]"  # zoom ke baad SAR/size normalize (concat ke liye)
 
 
@@ -147,7 +156,7 @@ def finish_chain(look, W, H):
     return out
 
 
-def broll_segment(shots, vo_mp3, out: Path, cfg, W, H, card_png=None, gap=0.35, look=None):
+def broll_segment(shots, vo_mp3, out: Path, cfg, W, H, card_png=None, gap=0.35, look=None, grade=None):
     """shots: [(src_path, start, dur, fx)] — muted footage cut to VO length, edited per style profile."""
     vo_d = duration(vo_mp3)
     total = vo_d + gap
@@ -169,7 +178,9 @@ def broll_segment(shots, vo_mp3, out: Path, cfg, W, H, card_png=None, gap=0.35, 
         chains.append(_shot_chain(n, n, d, fx, cfg, W, H, cw, ch, c))
     k = len(seq)
     fc = ";".join(chains) + ";" + "".join(f"[s{n}]" for n in range(k)) + f"concat=n={k}:v=1:a=0,trim=0:{total:.3f},setpts=PTS-STARTPTS"
-    if cfg["video"]["broll_grade"]:
+    if grade:  # locked style ka color grade
+        fc += f",eq=saturation={grade.get('saturation', 1)}:contrast={grade.get('contrast', 1)}:brightness={grade.get('brightness', 0)}"
+    elif cfg["video"]["broll_grade"]:
         fc += ",eq=saturation=0.72:contrast=1.1:brightness=-0.035,vignette=PI/4.5"
     fc += finish_chain(look or {}, W, H) + "[bv]"
     last = "bv"
@@ -242,7 +253,8 @@ def final_mix(video: Path, music: Path, out: Path, cfg, W, srt: Path = None, ste
     if burn:
         style = "FontName=Arial Black,FontSize=15,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BorderStyle=1,Outline=2,Shadow=0,MarginV=60"
         srt_esc = str(srt.resolve()).replace(":", r"\:").replace("'", r"\'")
-        fv = f"[0:v]subtitles='{srt_esc}':force_style='{style}'[v]"
+        fv = (f"[0:v]subtitles='{srt_esc}'[v]" if srt.suffix == ".ass"
+              else f"[0:v]subtitles='{srt_esc}':force_style='{style}'[v]")
         args += ["-filter_complex", fa + ";" + fv, "-map", "[v]", "-map", "[a]", *common_out(cfg, W)]
     else:
         args += ["-filter_complex", fa, "-map", "0:v", "-map", "[a]", "-c:v", "copy",

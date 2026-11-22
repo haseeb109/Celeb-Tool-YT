@@ -1,0 +1,91 @@
+{
+  "pacing": {
+    "median_shot_s": 3.5,
+    "p25_shot_s": 2.5,
+    "p75_shot_s": 5.0,
+    "cuts_per_min": 17.0
+  },
+  "motion": {
+    "moving_ratio": 0.65,
+    "zoom_in_ratio": 0.6,
+    "zoom_speed": 0.03,
+    "pan_speed": 0.004
+  },
+  "transitions": {
+    "cut": 0.9,
+    "flash": 0.06,
+    "dip_to_black": 0.0,
+    "crossfade": 0.0,
+    "glitch": 0.04
+  },
+  "look": {
+    "saturation": 0,
+    "letterbox": 0.0,
+    "vignette_ratio": 0.6,
+    "grain": 8.0
+  },
+  "text": {
+    "overlay_rate": 0.6,
+    "position": "center",
+    "height_ratio": 0.07,
+    "caps_ratio": 1.0,
+    "color_rgb": [
+      255,
+      255,
+      255
+    ]
+  },
+  "sfx": {
+    "whoosh": 0.55,
+    "hit": 0.2,
+    "riser": 0.08
+  },
+  "grade": {
+    "saturation": 0.8,
+    "contrast": 1.15,
+    "brightness": -0.03
+  },
+  "captions": {
+    "enabled": true,
+    "words_per_chunk": 2,
+    "color_rgb": [
+      255,
+      255,
+      255
+    ],
+    "highlight_rgb": [
+      255,
+      214,
+      0
+    ],
+    "size_ratio": 0.095,
+    "position": "lower",
+    "font": "Impact",
+    "pop": true
+  },
+  "clip_frame": "blur_fill",
+  "vision": [
+    {
+      "effects": [
+        "film grain",
+        "dark vignette",
+        "white flash",
+        "glitch",
+        "light leaks",
+        "blurred background behind vertical clips"
+      ],
+      "text_style": "bold condensed sans, ALL CAPS, white with yellow emphasis word, thick black outline, pops in synced to voice",
+      "framing": "mixed 16:9 and 9:16 clips; vertical clips on blurred background",
+      "mood": "dark dramatic cinematic"
+    }
+  ],
+  "notes": "Built from NexLev frame-by-frame + watch analysis of cloutville 'Jim Caviezel GOES OFF On Hollywood' (0:00-4:00). Numbers are editor estimates; run Analyze on the same link to replace pacing/motion/transitions/sfx with measured values (grade/captions/clip_frame are kept).",
+  "_meta": {
+    "name": "Style 1",
+    "sources": [
+      "https://youtu.be/hpy4-kBGioE"
+    ],
+    "created": "2026-11-22 05:30",
+    "method": "nexlev-watch"
+  }
+}

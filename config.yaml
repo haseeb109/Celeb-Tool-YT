@@ -54,7 +54,7 @@ video:
   # Competitor ka editing style copy: pacing, zoom/pan, transitions, text style, look, sound effects.
   # Ye sirf VIDEO layer hai — script / master prompt par koi asar nahi.
   replicate_style: true
-  style_lock: ""                # GUI → 🎨 Style tab se lock hota hai. Khaali = har job apni source videos se style naapti hai
+  style_lock: "style-1"         # GUI → 🎨 Style tab se lock hota hai. Khaali = har job apni source videos se style naapti hai
   vision_model: "qwen2.5vl:7b"   # Ollama local vision model (16GB RAM ok). "" = skip
   sfx_gain_db: -6               # sound effects volume
   # Overlays abhi Pillow se bante hain (tez, Node ki zaroorat nahi). HyperFrames animated cards = phase 2.

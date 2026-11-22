@@ -241,7 +241,8 @@ def stage_clips(job, cfg, ts, llm, **_):
         prof = _profile(job)
         tr = prof.get("transitions", {})
         trans = random.Random(cid + job.id).choices(list(tr), weights=list(tr.values()))[0] if tr and sum(tr.values()) else "cut"
-        media.cut_clip(srcfile(job, c["src"]), st, en, d / f"{cid}.mp4", cfg, job.W, job.H, tag, trans)
+        media.cut_clip(srcfile(job, c["src"]), st, en, d / f"{cid}.mp4", cfg, job.W, job.H, tag, trans,
+                       prof.get("clip_frame", "pad"))
         job.log(f"   {cid} T{c['src']} {fmt(st)}–{fmt(en)} ({en - st:.1f}s, {how})")
     job.j("script.json", script)
 
@@ -335,7 +336,8 @@ def stage_visuals(job, cfg, ts, llm, **_):
                 card = overlays.label_card(s["card"]["kind"].upper(), s["card"]["text"], job.W, job.H,
                                            job.work / f"card_{si:02d}_{gi:02d}.png", fonts, tstyle)
             _, tot, cuts = media.broll_segment(shots, Path(s["vo"]), out, cfg, job.W, job.H, card,
-                                               look=prof.get("look") if prof else None)
+                                               look=prof.get("look") if prof else None,
+                                               grade=prof.get("grade") if prof else None)
             s["seg"], s["seg_dur"], s["cuts"] = str(out), tot, cuts
             k += 1
         job.log(f"   visuals {sec['id']} ready")
@@ -366,7 +368,17 @@ def stage_assemble(job, cfg, ts, llm, **_):
     tag = "4k" if job.W > 2000 else "1080p"
     full = media.concat(parts, job.work / "full_nomusic.mp4")
     srt_path = None
-    if job.spec.get("subtitles", cfg["video"]["subtitles"]):
+    cap = (_profile(job) or {}).get("captions")
+    if cap and cap.get("enabled", True) and job.spec.get("subtitles", True) is not False:
+        from .captions import write_ass
+        ws = []
+        for a, b, chunk in srt:
+            toks = chunk.split()
+            step = (b - a) / max(1, len(toks))
+            ws += [(t, a + k * step, a + (k + 1) * step) for k, t in enumerate(toks)]
+        srt_path = write_ass(ws, job.out / "captions.ass", job.W, job.H, cap)
+        job.log("   captions: locked style ke mutabiq (ALL CAPS + highlight)")
+    elif job.spec.get("subtitles", cfg["video"]["subtitles"]):
         srt_path = job.out / "subtitles.srt"
         srt_path.write_text("".join(f"{i}\n{_srt_t(a)} --> {_srt_t(b)}\n{w}\n\n" for i, (a, b, w) in enumerate(srt, 1)))
     music = media.music_bed(ROOT / cfg["music"]["folder"], t, job.work / "music_bed.wav", job.id, job.work)

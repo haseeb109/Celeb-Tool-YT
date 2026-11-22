@@ -39,6 +39,10 @@ def analyze_reference(sources, name, log=print):
     if not vids:
         raise RuntimeError("Koi link ya video nahi di")
     prof = style.analyze(vids, ref / "work", cfg["video"].get("vision_model") or None, log)
+    old = load(slug) or {}
+    for k in ("grade", "captions", "clip_frame", "notes"):  # hand-tuned keys survive re-analysis
+        if k in old:
+            prof[k] = old[k]
     prof["_meta"] = {"name": name, "sources": [s for s in sources if s.strip()],
                      "created": time.strftime("%Y-%m-%d %H:%M")}
     DIR.mkdir(exist_ok=True)
@@ -83,6 +87,14 @@ def summary(prof):
         f"**Look:** letterbox {prof['look'].get('letterbox', 0):.0%} · vignette {'haan' if prof['look'].get('vignette_ratio', 1) < 0.72 else 'nahi'} · grain {prof['look'].get('grain', 0):.1f}",
         "**Sound effects (per cut):** " + (", ".join(f"{k} {v:.0%}" for k, v in sfx.items()) or "—"),
     ]
+    if prof.get("grade"):
+        g = prof["grade"]
+        lines.append(f"**Color grade:** saturation {g.get('saturation')} · contrast {g.get('contrast')} · brightness {g.get('brightness')}")
+    if prof.get("captions"):
+        c = prof["captions"]
+        lines.append(f"**Captions:** {c.get('words_per_chunk')} words at a time · {c.get('font')} · ALL CAPS · highlight {c.get('highlight_rgb')} · {c.get('position')}")
+    if prof.get("clip_frame"):
+        lines.append(f"**Original clips:** {prof['clip_frame']}")
     for n in prof.get("vision") or []:
         if n.get("effects"):
             lines.append("**Effects (vision model):** " + ", ".join(map(str, n["effects"])))
