@@ -94,7 +94,8 @@ def summary(prof):
         c = prof["captions"]
         lines.append(f"**Captions:** {c.get('words_per_chunk')} words at a time · {c.get('font')} · ALL CAPS · highlight {c.get('highlight_rgb')} · {c.get('position')}")
     if prof.get("clip_frame"):
-        lines.append(f"**Original clips:** {prof['clip_frame']}")
+        lines.append(f"**Original clips:** {'purple frame + white border + full-length progress bar' if prof['clip_frame'] == 'purple_box' else prof['clip_frame']}"
+                     + (f" · {prof.get('clip_transition')} in/out" if prof.get('clip_transition') else ""))
     for n in prof.get("vision") or []:
         if n.get("effects"):
             lines.append("**Effects (vision model):** " + ", ".join(map(str, n["effects"])))

@@ -276,8 +276,10 @@ def stage_clips(job, cfg, ts, llm, **_):
     def cut(cid):
         c = script["clips"][cid]
         trans = random.Random(cid + job.id).choices(list(tr), weights=list(tr.values()))[0] if tr and sum(tr.values()) else "cut"
+        if prof.get("clip_transition"):
+            trans = prof["clip_transition"]
         media.cut_clip(srcfile(job, c["src"]), c["cut_start"], c["cut_end"], d / f"{cid}.mp4", cfg, job.W, job.H, tag, trans,
-                       prof.get("clip_frame", "pad"))
+                       prof.get("clip_frame", "pad"), prof.get("clip_frame_spec"))
         job.log(f"   {cid} T{c['src']} {fmt(c['cut_start'])}–{fmt(c['cut_end'])} ({c['cut_end'] - c['cut_start']:.1f}s, {c['edge_source']})")
     with ThreadPoolExecutor(max_workers=WORKERS) as ex:  # FFmpeg cuts parallel
         list(ex.map(cut, sorted(used)))

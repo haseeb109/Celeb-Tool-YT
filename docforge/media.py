@@ -96,9 +96,18 @@ def refine_edges(src, start, end, quote, work: Path, log):
 
 
 # ------------------------------------------------------------------ segments
-def cut_clip(src, start, end, out: Path, cfg, W, H, tag_png=None, trans="cut", frame="pad"):
+def cut_clip(src, start, end, out: Path, cfg, W, H, tag_png=None, trans="cut", frame="pad", frame_spec=None):
     dur = end - start
     inputs = ["-ss", f"{start:.3f}", "-t", f"{dur:.3f}", "-i", str(src)]
+    if frame == "purple_box":  # Style 1: purple frame + full-length progress bar (hard cut, as measured)
+        from . import clipframe
+        sw, sh = clipframe.probe_wh(src)
+        extra, fcv = clipframe.build(sw, sh, W, H, dur, cfg["video"]["fps"], out.parent / "_frame", frame_spec)
+        af = (f"[0:a]aresample=48000,loudnorm=I=-15:TP=-1.5:LRA=11,afade=t=in:d=0.04,"
+              f"afade=t=out:st={max(0, dur - 0.08):.3f}:d=0.08[a]")
+        run(["ffmpeg", "-y", *inputs, *extra, "-filter_complex", fcv + "[v];" + af, "-map", "[v]", "-map", "[a]",
+             "-t", f"{dur:.3f}", *common_out(cfg, W), str(out)])
+        return out
     if frame == "blur_fill":  # vertical/odd-ratio clips: blurred copy of itself behind (style 1)
         vf = (f"[0:v]split=2[bg][fg];[bg]scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H},boxblur=28:2,eq=brightness=-0.08[bgb];"
               f"[fg]scale={W}:{H}:force_original_aspect_ratio=decrease[fgs];[bgb][fgs]overlay=(W-w)/2:(H-h)/2,"
