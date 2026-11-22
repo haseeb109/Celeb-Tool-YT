@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 
-from . import media, overlays, packaging, sfx, style, tts
+from . import broll, media, overlays, packaging, sfx, style, tts
 from .config import ROOT, load_config, master_prompt_text
 from .llm import LLM
 from .qa import run_qa
@@ -18,7 +18,7 @@ from .script_engine import (clean_segments, make_plan, narration_words, register
 from .transcript import Transcript, fmt
 
 WORKERS = 3  # parallel FFmpeg jobs (M1 Pro: 3 safe; videotoolbox ke saath)
-STAGES = ["ingest", "style", "plan", "write", "qa", "clips", "voice", "visuals", "assemble", "package"]
+STAGES = ["ingest", "style", "broll", "plan", "write", "qa", "clips", "voice", "visuals", "assemble", "package"]
 
 
 class Job:
@@ -46,7 +46,13 @@ class Job:
     def status(self):
         return json.loads(self.status_file.read_text()) if self.status_file.exists() else {"done": [], "state": "pending"}
 
+    _mlock = __import__("threading").Lock()
+
     def mark(self, stage=None, state=None, error=None):
+        with self._mlock:
+            self._mark(stage, state, error)
+
+    def _mark(self, stage=None, state=None, error=None):
         s = self.status()
         if stage and stage not in s["done"]:
             s["done"].append(stage)
@@ -95,9 +101,30 @@ def run_job(path: Path, force_from=None, voice_override=None):
     try:
         ts = job.transcripts()
         src = {}
+        bg = {}
         for stage in STAGES:
             if stage in done:
                 continue
+            if stage == "broll":
+                if cfg.get("broll", {}).get("source", "internet") == "competitor":
+                    job.mark("broll")
+                    continue
+                job.log("▶ broll (background mein — script ke saath saath chalega)")
+
+                def _bg():
+                    try:
+                        broll.collect(job, cfg, ts, LLM(cfg, job.log), job.log)
+                        job.mark("broll")
+                    except Exception as e:
+                        bg["err"] = e
+                        job.log(f"   ⚠ b-roll fail ({str(e)[:150]}) → competitor footage use hogi")
+                import threading
+                bg["t"] = threading.Thread(target=_bg, daemon=True)
+                bg["t"].start()
+                continue
+            if stage == "visuals" and bg.get("t") and bg["t"].is_alive():
+                job.log("   b-roll collection khatam hone ka intezar…")
+                bg["t"].join()
             job.log(f"▶ {stage}")
             if stage in ("plan", "write", "qa", "package") and llm is None:
                 llm = LLM(cfg, job.log)
@@ -322,6 +349,47 @@ def stage_visuals(job, cfg, ts, llm, **_):
     prof = _profile(job)
     rng = random.Random(job.id)
     k, tasks = 0, []
+    mode = cfg.get("broll", {}).get("source", "internet")
+    pool_f = job.work / "broll" / "pool.json"
+    pool = json.loads(pool_f.read_text()).get("pool", []) if (mode != "competitor" and pool_f.exists()) else []
+    vids = [p for p in pool if p["kind"] in ("clip", "local") and p.get("dur", 0) >= 1.5]
+    imgs = [p for p in pool if p["kind"] == "image"]
+    if mode != "competitor" and not vids and not imgs:
+        job.log("   ⚠ b-roll pool khali → competitor footage use ho rahi hai")
+    else:
+        job.log(f"   b-roll: {len(vids)} clips + {len(imgs)} photos (mode: {mode})")
+    order = {"i": 0, "seq": []}
+    img_ratio = float(cfg.get("broll", {}).get("image_ratio", 0.2))
+
+    def next_vid():
+        if not order["seq"]:
+            order["seq"] = vids[:]
+            rng.shuffle(order["seq"])
+        return order["seq"].pop()
+
+    def pool_shots(need):
+        out, acc, last = [], 0.0, None
+        while acc < need + 0.5:
+            if imgs and (not vids or rng.random() < img_ratio):
+                a = rng.choice(imgs)
+                L = min(a["dur"], max(3.5, _shot_len(prof, rng) + 1.0))
+                fx = _fx(prof, rng, L)
+                fx.update(zoom=0.0, pan=0.0, nocrop=True)  # photo pehle se animated hai
+                out.append((Path(a["path"]), 0.0, L, fx))
+            else:
+                a = next_vid()
+                if a is last and len(vids) > 1:
+                    a = next_vid()
+                L = min(_shot_len(prof, rng), a["dur"] - 0.1)
+                st = rng.uniform(0, max(0.0, a["dur"] - L - 0.05))
+                fx = _fx(prof, rng, L)
+                fx["nocrop"] = True
+                if a.get("h", 9) > a.get("w", 16) * 0.9:
+                    fx["fit"] = "blur"
+                out.append((Path(a["path"]), st, L, fx))
+            last = a
+            acc += out[-1][2]
+        return out
     for si, sec in enumerate(script["sections"]):
         for gi, s in enumerate(sec["segments"]):
             if s["type"] != "narration":
@@ -337,6 +405,19 @@ def stage_visuals(job, cfg, ts, llm, **_):
                     pos += L
             if not shots:
                 shots = [(a, b_, _shot_len(prof, rng), _fx(prof, rng, 3)) for a, b_, _ in _fallback_shots(job, ts, clip_ranges, k)]
+            if vids or imgs:  # internet b-roll under the AI voice
+                need = media.duration(s["vo"]) + 0.35
+                ps = pool_shots(need)
+                if mode == "mix":  # ~30% competitor footage beech mein
+                    mixed, ci = [], 0
+                    for sh in ps:
+                        if rng.random() < 0.3 and shots:
+                            mixed.append(shots[ci % len(shots)])
+                            ci += 1
+                        else:
+                            mixed.append(sh)
+                    ps = mixed
+                shots = ps
             card = None
             tstyle = prof.get("text") if prof else None
             use_cards = cfg["video"]["label_cards"] or (tstyle and tstyle.get("overlay_rate", 0) >= 0.15)
@@ -441,6 +522,9 @@ def stage_package(job, cfg, ts, llm, **_):
            *[f"- {x}" for x in pk["thumbnail_texts"]]]
     (job.out / "packaging.md").write_text("\n".join(txt))
     (job.out / "project.json").write_text(json.dumps(script, indent=2, ensure_ascii=False))
+    pf = job.work / "broll" / "pool.json"
+    if pf.exists():
+        (job.out / "broll_sources.txt").write_text(broll.credits(json.loads(pf.read_text()).get("pool", [])))
     qa = job.work / "qa_report.json"
     if qa.exists():
         (job.out / "qa_report.json").write_text(qa.read_text())

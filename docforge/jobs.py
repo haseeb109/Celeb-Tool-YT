@@ -14,7 +14,7 @@ def jobs_dir():
     return d
 
 
-def create_job(name, link1, transcript1, link2, transcript2, rumor, quality=None, voice=None, subtitles=None):
+def create_job(name, link1, transcript1, link2, transcript2, rumor, quality=None, voice=None, subtitles=None, subject=None):
     slug = re.sub(r"[^a-z0-9]+", "-", (name or rumor)[:40].lower()).strip("-") or "job"
     d = jobs_dir() / f"{time.strftime('%m%d-%H%M%S')}-{slug}"
     d.mkdir(parents=True)
@@ -23,6 +23,8 @@ def create_job(name, link1, transcript1, link2, transcript2, rumor, quality=None
         spec["quality"] = quality
     if voice:
         spec["voice"] = voice
+    if subject and subject.strip():
+        spec["subject"] = subject.strip()
     if subtitles is not None:
         spec["subtitles"] = bool(subtitles)
     (d / "job.yaml").write_text(yaml.safe_dump(spec, allow_unicode=True, sort_keys=False))

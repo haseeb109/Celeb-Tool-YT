@@ -72,3 +72,15 @@ cp -r jobs/_example jobs/drake-feud        # job.yaml + transcript1.txt + transc
 - Pacing aur zoom PySceneDetect + OpenCV se, text style Apple Vision OCR (`ocrmac`) se.
 - Ollama `qwen2.5vl:7b` effects pehchanta hai (16GB RAM par chal jata hai). `install.sh` ise khud install karta hai.
 - Sound effects `assets/sfx/whoosh|hit|riser/` se aate hain. Pehli dafa basic set khud ban jata hai; apne SFX in folders mein daal do to wahi use honge.
+
+## Internet b-roll (MediaForge merge)
+Hook ke baad AI voice ke neeche ab celebrity ki **internet clips** (interviews, talk shows, red carpet, public appearances) aur **animated photos** chalti hain.
+- **Celebrity name:** New Job mein likho, ya khaali chhodo. Khaali ho to AI rumor aur transcripts se naam khud nikalta hai.
+- **Kaise:** YouTube par latest-first search hoti hai (pehle last 90 din, kam milein to sab dates). Har video ka 360p preview aata hai, AI frames dekh kar woh lamhe chunta hai jahan celebrity screen par ho, phir unhein verify karta hai. Sirf woh 5/8/10s hisse full quality mein download hote hain.
+- **Photos:** Wikimedia Commons se aati hain: slow zoom, blurred background, white border.
+- **Apna folder:** Settings → B-roll → folder path do. Wahan ki videos bhi shuffle hongi.
+- **Background:** b-roll collection script likhne ke saath saath chalti hai, isliye kul waqt nahi badhta.
+- **Source list:** har video ke `output/<job>/broll_sources.txt` mein hoti hai.
+- **Purana tareeqa:** Settings → B-roll → "Sirf competitor footage".
+- **Vision:** pehle cloud model (DeepSeek v4.1) frames dekhta hai. Woh images na le to local Ollama `qwen2.5vl:7b` istemal hota hai.
+- **Quick Download:** Settings tab mein link do aur MP4 `output/downloads` mein save ho jati hai.

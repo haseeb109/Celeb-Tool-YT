@@ -7,7 +7,7 @@ master_prompt:
   sha256: 44882a70a2774ff8fe6c0ff2b11ae9818f243cb43b57ea3219a676d5204a880d
 
 llm:
-  base_url: https://api.deploy.com/api/v1          # OpenAI-compatible (docs.deploy.com/quickstart)
+  base_url: https://api.deploy.com/api/v1   # chal raha hai. Na chale to GUI "Test Deploy" Hive URLs (api-cdn/api-va1.thehive.ai) bhi try karta hai
   writer_model: deepseek-ai/deepseek-v4.1-flash-1017  # plan + script likhta hai
   writer_reasoning: high                            # none | low | high | max
   auditor_model: zai-org/glm-5.3-flash              # Phase 2 cross-check (dusra model = independent audit)
@@ -59,6 +59,24 @@ video:
   vision_model: "qwen2.5vl:7b"   # Ollama local vision model (16GB RAM ok). "" = skip
   sfx_gain_db: -6               # sound effects volume
   # Overlays abhi Pillow se bante hain (tez, Node ki zaroorat nahi). HyperFrames animated cards = phase 2.
+
+broll:
+  # AI voice ke neeche (hook ke baad) kya chale: internet | competitor | mix
+  #   internet   = celebrity ki internet clips + animated photos (+ aapka folder)
+  #   competitor = purana tareeqa: sirf dono competitor videos ki footage
+  #   mix        = zyada internet, kuch competitor
+  source: internet
+  target_clips: 40          # kitni 5/8/10s clips collect hon
+  clip_lengths: [5, 8, 10]
+  max_per_source: 3         # ek video se zyada se zyada clips
+  results_per_query: 8
+  recent_days: 90           # pehle last 90 din; kam milein to sab dates
+  max_source_minutes: 60
+  images: 12                # Wikimedia Commons photos (animated)
+  image_ratio: 0.2          # har 5 shots mein ~1 photo
+  local_folder: ""          # apna folder (jaise /Users/haseeb/Movies/keanu). Khaali = off
+  parallel: 3
+  keep_previews: false
 
 music:
   folder: assets/music      # ek dafa yahan mp3/wav daal do, har video mein yahi use hogi

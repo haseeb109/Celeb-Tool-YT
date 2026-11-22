@@ -13,7 +13,7 @@ from docforge.jobs import create_job, list_jobs
 from docforge.pipeline import STAGES, run_job
 
 _worker = {"thread": None, "current": None}
-STAGE_LABELS = ["Download", "Style", "Plan", "Script", "QA", "Clips", "Voice", "Visuals", "Assemble", "Package"]
+STAGE_LABELS = ["Download", "Style", "B-roll", "Plan", "Script", "QA", "Clips", "Voice", "Visuals", "Assemble", "Package"]
 CSS = """
 .gradio-container {max-width: 1400px !important}
 #title h1 {margin-bottom: 0}
@@ -62,11 +62,11 @@ def tail():
 
 
 # ------------------------------------------------------------------ actions
-def add_job(name, l1, t1, f1, l2, t2, f2, rumor, quality, voice, subs):
+def add_job(name, l1, t1, f1, l2, t2, f2, rumor, subject, quality, voice, subs):
     t1, t2 = read_txt(f1, t1), read_txt(f2, t2)
     if not (l1.strip() and t1.strip() and rumor.strip()):
         return "✖ Link 1, Transcript 1 aur Rumor zaroori hain", jobs_table()
-    d = create_job(name, l1, t1, l2, t2, rumor, quality, _vid(voice), subs)
+    d = create_job(name, l1, t1, l2, t2, rumor, quality, _vid(voice), subs, subject)
     return f"✔ Queue mein add: **{d.name}**", jobs_table()
 
 
@@ -191,7 +191,7 @@ def do_update():
 
 
 # settings
-def settings_save(writer, auditor, w_eff, a_eff, voice, model_id, speed, quality, subs, crop_t, crop_b,
+def settings_save(b_src, b_n, b_days, b_img, b_dir, writer, auditor, w_eff, a_eff, voice, model_id, speed, quality, subs, crop_t, crop_b,
                   grade, cards, tag, mvol, duck):
     save_local({
         "llm": {"writer_model": writer, "auditor_model": auditor, "writer_reasoning": w_eff, "auditor_reasoning": a_eff},
@@ -199,6 +199,8 @@ def settings_save(writer, auditor, w_eff, a_eff, voice, model_id, speed, quality
         "video": {"quality": quality, "subtitles": bool(subs), "broll_crop": {"top": int(crop_t), "bottom": int(crop_b), "left": 0, "right": 0},
                   "broll_grade": bool(grade), "label_cards": bool(cards), "clip_tag": "ORIGINAL CLIP" if tag else ""},
         "music": {"volume_db": int(mvol), "duck": bool(duck)},
+        "broll": {"source": b_src, "target_clips": int(b_n), "recent_days": int(b_days), "images": int(b_img),
+                  "local_folder": (b_dir or "").strip()},
     })
     return "✔ Settings save (settings.local.yaml)"
 
@@ -274,6 +276,18 @@ def lock_status():
     return f"### 🔒 Locked style: **{lk}**" if lk else "### 🔓 Koi style lock nahi"
 
 
+def quick_download(url):
+    import subprocess
+    if not url or not url.strip().startswith("http"):
+        return "✖ Link do"
+    out = ROOT / load_config()["paths"]["output"] / "downloads"
+    out.mkdir(parents=True, exist_ok=True)
+    p = subprocess.run(["yt-dlp", "-f", "bv*[vcodec^=avc1]+ba[ext=m4a]/bv*+ba/b", "--merge-output-format", "mp4", "-N", "8",
+                        "--no-playlist", "-o", str(out / "%(title).80s [%(id)s].%(ext)s"), url.strip()],
+                       capture_output=True, text=True)
+    return f"✔ Saved in `{out}`" if p.returncode == 0 else f"✖ {(p.stderr or p.stdout)[-300:]}"
+
+
 def doctor_text():
     import subprocess, sys
     r = subprocess.run([sys.executable, str(ROOT / "run.py"), "doctor"], capture_output=True, text=True, cwd=ROOT)
@@ -313,6 +327,8 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
                     with gr.Tab("📁 Upload"):
                         f2 = gr.File(show_label=False, file_types=[".txt", ".srt", ".vtt"], type="filepath")
         rumor = gr.Textbox(label="🔥 Main rumor / idea (1 line), poori video isi ke gird", lines=2)
+        subject = gr.Textbox(label="🎯 Celebrity name — AI voice ke neeche isi ki internet clips aur photos aayengi (khaali = AI khud nikalega)",
+                             placeholder="jaise: Keanu Reeves")
         with gr.Row():
             quality = gr.Radio(["1080p", "4k"], value=cfg["video"]["quality"], label="Quality")
             voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="AI33 voice (khaali = Settings wali)", allow_custom_value=True, scale=2)
@@ -426,6 +442,22 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
                 s_tag = gr.Checkbox(value=bool(cfg["video"]["clip_tag"]), label="'ORIGINAL CLIP' tag")
         with gr.Row():
             with gr.Column():
+                gr.Markdown("### 🎞 B-roll (AI voice ke neeche, hook ke baad)")
+                b_src = gr.Radio([("Internet clips + photos", "internet"), ("Internet + competitor mix", "mix"), ("Sirf competitor footage", "competitor")],
+                                 value=cfg.get("broll", {}).get("source", "internet"), label="Footage source")
+                b_n = gr.Slider(10, 80, value=cfg.get("broll", {}).get("target_clips", 40), step=5, label="Internet clips (5/8/10s)")
+                b_days = gr.Dropdown([("Last 30 din", 30), ("Last 90 din", 90), ("Last 1 saal", 365), ("Koi limit nahi", 0)],
+                                     value=cfg.get("broll", {}).get("recent_days", 90), label="Pehle kitni recent clips (kam milein to purani bhi)")
+                b_img = gr.Slider(0, 30, value=cfg.get("broll", {}).get("images", 12), step=1, label="Photos (animated, Wikimedia)")
+                b_dir = gr.Textbox(cfg.get("broll", {}).get("local_folder", ""), label="Apna videos folder (optional, shuffle hoga)",
+                                   placeholder="/Users/haseeb/Movies/keanu")
+            with gr.Column():
+                gr.Markdown("### 📥 Quick Download (MediaForge)")
+                qd_url = gr.Textbox(label="YouTube / Instagram / TikTok / X link")
+                qd_go = gr.Button("Download MP4")
+                qd_out = gr.Markdown()
+        with gr.Row():
+            with gr.Column():
                 gr.Markdown("### Music (ek dafa lock, har video mein yahi)")
                 m_up = gr.File(label="Music files add karo", file_count="multiple", file_types=["audio"], type="filepath")
                 m_tbl = gr.Dataframe(headers=["File", "Size"], value=music_list, interactive=False)
@@ -454,7 +486,7 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
     st_lock.click(style_lock, st_pick, [st_lmsg, st_status])
     st_unlock.click(style_unlock, None, [st_lmsg, st_status])
     ui.load(lambda: gr.Dropdown(choices=_st.list_styles(), value=_st.locked() or None), None, st_pick)
-    add.click(add_job, [name, l1, t1, f1, l2, t2, f2, rumor, quality, voice, subs], [add_msg, grid])
+    add.click(add_job, [name, l1, t1, f1, l2, t2, f2, rumor, subject, quality, voice, subs], [add_msg, grid])
     go.click(start_queue, qvoice, qmsg)
     rbtn.click(rerun, [rjob, rstage, qvoice], qmsg)
     dbtn.click(delete_job, rjob, [qmsg, grid])
@@ -463,7 +495,8 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
     ksave.click(keys_save, [dkey, akey], [kmsg, dstat, astat, dkey, akey])
     dtest.click(test_deploy, dkey, [kmsg, dstat])
     atest.click(test_ai33, akey, [kmsg, astat])
-    ssave.click(settings_save, [s_writer, s_aud, s_weff, s_aeff, s_voice, s_model, s_speed, s_q, s_subs, s_ct, s_cb,
+    qd_go.click(quick_download, qd_url, qd_out)
+    ssave.click(settings_save, [b_src, b_n, b_days, b_img, b_dir, s_writer, s_aud, s_weff, s_aeff, s_voice, s_model, s_speed, s_q, s_subs, s_ct, s_cb,
                                 s_grade, s_cards, s_tag, s_mvol, s_duck], smsg)
     m_up.upload(music_add, m_up, m_tbl)
     m_clr.click(music_clear, None, m_tbl)

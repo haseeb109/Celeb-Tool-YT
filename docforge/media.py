@@ -128,8 +128,15 @@ def _shot_chain(n, src_i, d, fx, cfg, W, H, cw, ch, c):
     z, pan, tr = fx.get("zoom", 0.0), fx.get("pan", 0.0), fx.get("trans", "cut")
     margin = 1.0 + abs(pan) * d + 0.02
     BW, BH = int(W * margin) // 2 * 2, int(H * margin) // 2 * 2
-    f = (f"[{src_i}:v]crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{c['left'] / 100:.4f}:ih*{c['top'] / 100:.4f},"
-         f"scale={BW}:{BH}:force_original_aspect_ratio=increase,crop={BW}:{BH},setsar=1,fps={fps}")
+    if fx.get("nocrop"):  # internet/local clips: competitor wala subtitle-crop nahi
+        cw, ch, c = 1.0, 1.0, {"left": 0, "top": 0, "right": 0, "bottom": 0}
+    if fx.get("fit") == "blur":  # vertical clip → blurred copy behind (crop nahi)
+        f = (f"[{src_i}:v]split=2[bg{n}][fg{n}];[bg{n}]scale={BW}:{BH}:force_original_aspect_ratio=increase,crop={BW}:{BH},"
+             f"boxblur=28:2,eq=brightness=-0.08[bb{n}];[fg{n}]scale={BW}:{BH}:force_original_aspect_ratio=decrease[ff{n}];"
+             f"[bb{n}][ff{n}]overlay=(W-w)/2:(H-h)/2,setsar=1,fps={fps}")
+    else:
+        f = (f"[{src_i}:v]crop=iw*{cw:.4f}:ih*{ch:.4f}:iw*{c['left'] / 100:.4f}:ih*{c['top'] / 100:.4f},"
+             f"scale={BW}:{BH}:force_original_aspect_ratio=increase,crop={BW}:{BH},setsar=1,fps={fps}")
     if abs(z) > 0.001:
         grow = f"(1+{abs(z):.4f}*t)" if z > 0 else f"(1+{abs(z):.4f}*({d:.3f}-t))"
         f += f",scale=w='{BW}*{grow}':h=-2:eval=frame"
