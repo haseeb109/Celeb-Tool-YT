@@ -21,11 +21,92 @@ CSS = T.CSS
 
 # ------------------------------------------------------------------ helpers
 def voices(search="", source=""):
+    """Dropdown choices: ⭐ favourites pehle."""
     try:
         from docforge import tts
-        return [tts.label(v) for v in tts.list_voices(search, source)]
+        favs = set(_favs())
+        vs = tts.list_voices(search, source)
+        vs.sort(key=lambda v: (v["id"] not in favs, v["name"].lower()))
+        return [("⭐ " if v["id"] in favs else "") + tts.label(v) for v in vs]
     except Exception as e:
         return [f"(error: {str(e)[:80]})"]
+
+
+def _favs():
+    return list(load_config()["voice"].get("favorites", []) or [])
+
+
+VB_COLS = ["⭐", "Name", "Gender", "Language / accent", "Provider", "Use case / tags", "voice_id"]
+
+
+def vb_search(q, prov, gender, lang, fav_only, refresh=False):
+    from docforge import tts
+    try:
+        vs = tts.all_voices(refresh=refresh)
+    except Exception as e:
+        return [], [], f"✖ {str(e)[:200]}", gr.Dropdown()
+    favs = set(_favs())
+    langs = sorted({v["language"] for v in vs if v["language"]})
+    ql = (q or "").lower().strip()
+    out = []
+    for v in vs:
+        if prov and prov != "all" and v["source"] != prov:
+            continue
+        if gender and gender != "any" and v["gender"] != gender:
+            continue
+        if lang and lang != "all" and v["language"] != lang:
+            continue
+        if fav_only and v["id"] not in favs:
+            continue
+        if ql and ql not in " ".join([v["name"], v["description"], v["language"], v["accent"], v["use_case"], v["age"], " ".join(v["tags"])]).lower():
+            continue
+        out.append(v)
+    out.sort(key=lambda v: (v["id"] not in favs, v["name"].lower()))
+    rows = [["⭐" if v["id"] in favs else "", v["name"], v["gender"], " · ".join(x for x in (v["language"], v["accent"]) if x),
+             v["source"], ", ".join(x for x in [v["use_case"]] + v["tags"] if x)[:80], v["id"]] for v in out]
+    msg = f"**{len(out)}** voices (kul {len(vs)} · ⭐ {len(favs)} favourites) — row par click karo: details, preview, favourite, use"
+    return rows, [v["id"] for v in out], msg, gr.Dropdown(choices=["all"] + langs, value=lang or "all")
+
+
+def vb_select(ids, evt: gr.SelectData):
+    from docforge import tts
+    try:
+        vid = ids[evt.index[0]]
+    except Exception:
+        return "", None, ""
+    v = tts._VOICE_CACHE.get(vid) or {}
+    star = "⭐ " if vid in set(_favs()) else ""
+    det = (f"### {star}{v.get('name', vid)}\n"
+           f"{' · '.join(x for x in (v.get('gender'), v.get('age'), v.get('language'), v.get('accent'), v.get('source')) if x)}\n\n"
+           f"{v.get('description') or ''}\n\n"
+           + (f"Tags: {', '.join(v.get('tags') or [])}\n\n" if v.get('tags') else "")
+           + f"`{vid}`")
+    return det, (v.get("preview") or None), vid
+
+
+def vb_fav(vid, q, prov, gender, lang, fav_only):
+    if not vid:
+        return "Pehle list mein se voice chuno", *vb_search(q, prov, gender, lang, fav_only)[:3]
+    f = _favs()
+    if vid in f:
+        f.remove(vid)
+        m = "☆ Favourite se hata di"
+    else:
+        f.insert(0, vid)
+        m = "⭐ Favourite mein add — agli dafa sab se upar milegi"
+    save_local({"voice": {"favorites": f}})
+    rows, ids, msg, _ = vb_search(q, prov, gender, lang, fav_only)
+    return m, rows, ids, msg
+
+
+def vb_use(vid):
+    from docforge import tts
+    if not vid:
+        return "Pehle list mein se voice chuno", gr.Dropdown()
+    save_local({"voice": {"voice": vid}})
+    v = tts._VOICE_CACHE.get(vid) or {"name": vid, "gender": "", "accent": "", "source": "", "id": vid}
+    lab = tts.label(v)
+    return f"✔ Default voice: **{v.get('name', vid)}** — agli jobs isi voice se banengi", gr.Dropdown(choices=[lab], value=lab)
 
 
 def _vid(choice):
@@ -195,7 +276,7 @@ def test_ai33(key):
 
 
 def voice_search(q, src):
-    v = voices(q or "", src or "elevenlabs")
+    v = voices(q or "", "" if src in (None, "all") else src)
     if v and v[0].startswith("(error"):
         return gr.Dropdown(choices=[], value=None), v[0]
     return gr.Dropdown(choices=v, value=v[0] if v else None), f"{len(v)} voices"
@@ -433,6 +514,31 @@ with gr.Blocks(title="Celeb Studio", **({} if GR6 else STYLE)) as ui:
                 st_lmsg = gr.Markdown()
                 gr.Markdown("*Ye sirf video ki editing par asar karta hai (pacing, zoom, transitions, text, look, sound effects). Script aur master prompt ke rules wahi rehte hain.*")
 
+    with gr.Tab("🎙 Voices"):
+        gr.Markdown("### AI33 Pro voices — saare providers, saare pages")
+        with gr.Row():
+            vb_q = gr.Textbox(label="Search (naam, accent, use case, tags)", placeholder="deep, narrator, british, documentary…", scale=3)
+            vb_prov = gr.Dropdown(["all", "elevenlabs", "minimax", "edge", "kokoro", "vbee", "fishaudio", "clone"], value="all", label="Provider", scale=1)
+            vb_gender = gr.Dropdown(["any", "male", "female"], value="any", label="Gender", scale=1)
+            vb_lang = gr.Dropdown(["all"], value="all", label="Language", allow_custom_value=True, scale=1)
+            vb_fo = gr.Checkbox(label="⭐ Sirf favourites", value=False, scale=1)
+        with gr.Row():
+            vb_go = gr.Button("🔍 Search", variant="primary")
+            vb_ref = gr.Button("↻ AI33 se dobara load (naye voices)")
+        vb_msg = gr.Markdown()
+        vb_ids = gr.State([])
+        vb_sel = gr.State("")
+        vb_tbl = gr.Dataframe(headers=VB_COLS, value=[], interactive=False, wrap=True, max_height=520)
+        with gr.Row():
+            with gr.Column(scale=2):
+                vb_det = gr.Markdown("*Row par click karo*")
+            with gr.Column(scale=1):
+                vb_audio = gr.Audio(label="Preview", interactive=False, autoplay=True)
+                with gr.Row():
+                    vb_star = gr.Button("⭐ Favourite / hatao")
+                    vb_use_b = gr.Button("✔ Default voice banao", variant="primary")
+                vb_act = gr.Markdown()
+
     with gr.Tab("🔑 API Keys"):
         gr.Markdown("Keys sirf aapke Mac par `.env` file mein save hoti hain. GitHub par kabhi nahi jati (`.gitignore`).")
         with gr.Row():
@@ -462,8 +568,9 @@ with gr.Blocks(title="Celeb Studio", **({} if GR6 else STYLE)) as ui:
                 gr.Markdown("**AI33 Pro**")
                 with gr.Row():
                     s_vq = gr.Textbox(label="Search", placeholder="jaise: deep male, narrator, british", scale=3)
-                    s_src = gr.Dropdown(["elevenlabs"], value="elevenlabs", label="Voice library", scale=1)
+                    s_src = gr.Dropdown(["all", "elevenlabs", "minimax", "edge", "kokoro", "vbee", "fishaudio", "clone"], value="all", label="Provider", scale=1)
                 s_vref = gr.Button("🔍 Voices dhoondo / load")
+                gr.Markdown("*Poori list, details aur ⭐ favourites ke liye **🎙 Voices** tab kholo*")
                 s_vcount = gr.Markdown()
                 s_voice = gr.Dropdown(choices=[], value=cfg["voice"]["voice"] or None, label="Default voice (ya voice_id paste karo)", allow_custom_value=True)
                 s_prev = gr.Audio(label="Preview sun lo", interactive=False)
@@ -519,6 +626,15 @@ with gr.Blocks(title="Celeb Studio", **({} if GR6 else STYLE)) as ui:
     for btn, dd in ((vref, voice), (qref, qvoice)):
         btn.click(lambda: gr.Dropdown(choices=voices()), None, dd)
     s_vref.click(voice_search, [s_vq, s_src], [s_voice, s_vcount])
+    _vb_in = [vb_q, vb_prov, vb_gender, vb_lang, vb_fo]
+    vb_go.click(vb_search, _vb_in, [vb_tbl, vb_ids, vb_msg, vb_lang])
+    vb_q.submit(vb_search, _vb_in, [vb_tbl, vb_ids, vb_msg, vb_lang])
+    for _c in (vb_prov, vb_gender, vb_fo):
+        _c.change(vb_search, _vb_in, [vb_tbl, vb_ids, vb_msg, vb_lang])
+    vb_ref.click(lambda *a: vb_search(*a, refresh=True), _vb_in, [vb_tbl, vb_ids, vb_msg, vb_lang])
+    vb_tbl.select(vb_select, vb_ids, [vb_det, vb_audio, vb_sel])
+    vb_star.click(vb_fav, [vb_sel] + _vb_in, [vb_act, vb_tbl, vb_ids, vb_msg])
+    vb_use_b.click(vb_use, vb_sel, [vb_act, s_voice])
     s_vq.submit(voice_search, [s_vq, s_src], [s_voice, s_vcount])
     s_voice.change(voice_preview, s_voice, s_prev)
     upd.click(do_update, None, upd_msg)

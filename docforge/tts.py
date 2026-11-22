@@ -23,31 +23,107 @@ def _h():
     return {"xi-api-key": _key(), "Content-Type": "application/json"}
 
 
+PROVIDERS = ["elevenlabs", "minimax", "edge", "kokoro", "vbee", "fishaudio", "clone"]
+CACHE = None  # set lazily: <root>/.cache/ai33_voices.json
+
+
+def _cache_path():
+    from .config import ROOT
+    p = ROOT / ".cache" / "ai33_voices.json"
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _norm(v, prov):
+    vid = v.get("voice_id") or v.get("id")
+    labels = v.get("labels") or {}
+    tags = v.get("tags") or []
+    if isinstance(tags, str):
+        tags = [tags]
+    return {"name": v.get("name") or v.get("voice_name") or vid, "id": vid,
+            "source": v.get("provider") or prov or (vid.split("_")[0] if "_" in str(vid) else ""),
+            "gender": (v.get("gender") or labels.get("gender") or "").lower(),
+            "accent": v.get("accent") or labels.get("accent") or "",
+            "language": v.get("language") or v.get("locale") or labels.get("language") or "",
+            "age": v.get("age") or labels.get("age") or "",
+            "use_case": v.get("use_case") or labels.get("use_case") or labels.get("description") or "",
+            "description": (v.get("description") or "")[:300],
+            "tags": [str(t) for t in tags][:8],
+            "preview": v.get("preview_url") or v.get("sample_url") or v.get("preview") or ""}
+
+
+def _fetch_provider(prov, search=""):
+    """Saare pages (page_size 100) jab tak has_more."""
+    out, page = [], 1
+    while page <= 60:
+        params = {"provider": prov, "page": page, "page_size": 100}
+        if search:
+            params["search"] = search
+        r = requests.get(f"{AI33}/v3/voices", headers=_h(), params=params, timeout=60)
+        if r.status_code != 200:
+            if page == 1:
+                raise RuntimeError(f"{prov}: {r.status_code} {r.text[:150]}")
+            break
+        j = r.json()
+        items = j.get("data") or j.get("voices") or j.get("items") or (j if isinstance(j, list) else [])
+        if isinstance(items, dict):
+            items = items.get("voices") or items.get("items") or []
+        out += [_norm(v, prov) for v in items if (v.get("voice_id") or v.get("id"))]
+        pg = j.get("pagination") or {}
+        if not pg.get("has_more") or not items:
+            break
+        page += 1
+    return out
+
+
+def all_voices(refresh=False, providers=None, log=None):
+    """Har provider ki saari voices (cache: 12 ghante). Fail hone wale provider skip."""
+    import time as _t
+    cp = _cache_path()
+    if not refresh and cp.exists() and _t.time() - cp.stat().st_mtime < 12 * 3600:
+        vs = json.loads(cp.read_text())
+    else:
+        vs, errs = [], []
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            res = list(ex.map(lambda p: (p, _safe(_fetch_provider, p)), providers or PROVIDERS))
+        for p, r in res:
+            if isinstance(r, Exception):
+                errs.append(f"{p}: {str(r)[:80]}")
+            else:
+                vs += r
+        if not vs and errs:
+            raise RuntimeError("AI33 voices nahi aayin — " + "; ".join(errs))
+        seen, uniq = set(), []
+        for v in vs:
+            if v["id"] not in seen:
+                seen.add(v["id"])
+                uniq.append(v)
+        vs = uniq
+        cp.write_text(json.dumps(vs))
+    for v in vs:
+        _VOICE_CACHE[v["id"]] = v
+    return vs
+
+
+def _safe(fn, *a):
+    try:
+        return fn(*a)
+    except Exception as e:
+        return e
+
+
 def list_voices(search="", source=""):
-    """[{name, id, source, gender, accent, preview}] from AI33 /v3/voices.
-    AI33 ka API 'provider' lazmi mangta hai — abhi sirf 'elevenlabs' allowed hai."""
-    params = {"page_size": 100, "provider": source or "elevenlabs"}
-    if search:
-        params["search"] = search
-    r = requests.get(f"{AI33}/v3/voices", headers=_h(), params=params, timeout=60)
-    if r.status_code != 200:
-        raise RuntimeError(f"AI33 voices {r.status_code}: {r.text[:200]}")
-    j = r.json()
-    items = j.get("voices") or j.get("data") or j.get("items") or (j if isinstance(j, list) else [])
-    if isinstance(items, dict):
-        items = items.get("voices") or items.get("items") or []
+    """Compat: search across all cached voices (name/description/tags/language)."""
+    vs = all_voices()
+    q = (search or "").lower().strip()
     out = []
-    for v in items:
-        vid = v.get("voice_id") or v.get("id")
-        if not vid:
+    for v in vs:
+        if source and source != "all" and v["source"] != source:
             continue
-        labels = v.get("labels") or {}
-        d = {"name": v.get("name") or v.get("voice_name") or vid, "id": vid,
-             "source": v.get("provider") or v.get("category") or "",
-             "gender": v.get("gender") or labels.get("gender", ""), "accent": v.get("accent") or labels.get("accent", ""),
-             "preview": v.get("preview_url") or v.get("sample_url") or v.get("preview") or ""}
-        out.append(d)
-        _VOICE_CACHE[vid] = d
+        if q and q not in " ".join([v["name"], v["description"], v["language"], v["accent"], v["use_case"], " ".join(v["tags"])]).lower():
+            continue
+        out.append(v)
     return out
 
 
