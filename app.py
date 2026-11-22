@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Celeb Tool YT — local GUI  →  python app.py  →  http://127.0.0.1:7860"""
+"""Celeb Studio — local GUI  →  python app.py  →  http://127.0.0.1:7860"""
 import json
 import os
 import shutil
@@ -331,7 +331,7 @@ cfg = load_config()
 THEME = gr.themes.Base(primary_hue="blue", neutral_hue="slate", font=[gr.themes.GoogleFont("Inter"), gr.themes.Font("system-ui"), gr.themes.Font("sans-serif")])
 GR6 = int(gr.__version__.split(".")[0]) >= 6
 STYLE = {"css": CSS, "theme": THEME}
-with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
+with gr.Blocks(title="Celeb Studio", **({} if GR6 else STYLE)) as ui:
     _ver = V.current()
     with gr.Row(elem_id="ice-head"):
         gr.HTML(T.brand_html(), elem_classes=["ice-plain"], scale=3)

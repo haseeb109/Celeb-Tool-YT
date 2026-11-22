@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Celeb Tool YT launcher — terminal mein sirf:  celeb
+# Celeb Studio launcher — terminal mein sirf:  celeb
 cd "$(dirname "$0")"
 PY=.venv/bin/python
 open_tool(){ echo "▶ Tool khul raha hai… (band karne ke liye Ctrl+C)"; $PY app.py; }
@@ -14,7 +14,7 @@ case "$1" in
   run) $PY run.py run; exit;;
 esac
 echo ""
-echo "  🎬 Celeb Tool YT"
+echo "  🎬 Celeb Studio"
 echo "  ─────────────────────────"
 echo "  1) Open tool (GUI)"
 echo "  2) Update tool"

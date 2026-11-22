@@ -1,4 +1,4 @@
-# Celeb Tool YT — Dark Documentary Pipeline (M1 Pro, local)
+# Celeb Studio — Dark Documentary Pipeline (M1 Pro, local)
 
 ![GUI](docs/gui-new-job.png)
 
@@ -17,7 +17,7 @@ Install ke baad **naya Terminal** kholo aur sirf likho:
 celeb
 ```
 Is se menu aata hai: 1) Open tool, 2) Update, 3) Update + Open, 4) Bulk queue bina GUI, 5) Doctor.
-Seedha bhi chala sakte ho: `celeb open`, `celeb update`, ya Finder mein **Celeb Tool.command** par double-click.
+Seedha bhi chala sakte ho: `celeb open`, `celeb update`, ya Finder mein **Celeb Studio.command** par double-click.
 GUI mein upar right par **⬆ Update tool** button hai: ek click mein update hota hai aur tool khud restart ho jata hai.
 
 GUI mein:
