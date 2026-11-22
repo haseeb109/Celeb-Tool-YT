@@ -13,3 +13,4 @@ settings.local.yaml
 styles/_ref/
 assets/sfx/*
 !assets/sfx/.keep
+.last_version

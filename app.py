@@ -14,11 +14,9 @@ from docforge.pipeline import STAGES, run_job
 
 _worker = {"thread": None, "current": None}
 STAGE_LABELS = ["Download", "Style", "B-roll", "Plan", "Script", "QA", "Clips", "Voice", "Visuals", "Assemble", "Package"]
-CSS = """
-.gradio-container {max-width: 1400px !important}
-#title h1 {margin-bottom: 0}
-.stage-done {color:#2ea043} .stage-todo {color:#666}
-"""
+from docforge import ui_theme as T
+from docforge import version as V
+CSS = T.CSS
 
 
 # ------------------------------------------------------------------ helpers
@@ -50,6 +48,34 @@ def jobs_table():
     return rows
 
 
+def queue_cards():
+    js = []
+    for j in list_jobs():
+        sf = j["path"] / "status.json"
+        js.append({**j, "status": json.loads(sf.read_text()) if sf.exists() else {}})
+    return T.queue_html(js, STAGES, STAGE_LABELS)
+
+
+def update_state():
+    """Header button: naya version hai to 'Update to vX', warna 'Latest ✓'."""
+    try:
+        r = V.remote()
+    except Exception:
+        r = None
+    cur = V.current()
+    if r and r["behind"] > 0:
+        return gr.Button(value=f"⟳  Update to {r['label']}", elem_classes=[])
+    return gr.Button(value=f"✓  {cur['label']} · latest", elem_classes=["latest"])
+
+
+def startup_toast():
+    u = V.just_updated()
+    if u:
+        old, cur, changes = u
+        return T.toast_html(f"Updated {old} → {cur['label']}", changes)
+    return ""
+
+
 def job_names(done_only=False):
     return [j["job"] for j in list_jobs() if (j["state"] == "done" or not done_only)]
 
@@ -65,9 +91,9 @@ def tail():
 def add_job(name, l1, t1, f1, l2, t2, f2, rumor, subject, quality, voice, subs):
     t1, t2 = read_txt(f1, t1), read_txt(f2, t2)
     if not (l1.strip() and t1.strip() and rumor.strip()):
-        return "✖ Link 1, Transcript 1 aur Rumor zaroori hain", jobs_table()
+        return "✖ Link 1, Transcript 1 aur Rumor zaroori hain", queue_cards()
     d = create_job(name, l1, t1, l2, t2, rumor, quality, _vid(voice), subs, subject)
-    return f"✔ Queue mein add: **{d.name}**", jobs_table()
+    return f"✔ Queue mein add: **{d.name}**", queue_cards()
 
 
 def _loop(voice):
@@ -116,9 +142,9 @@ def rerun(job, stage_label, voice):
 
 def delete_job(job):
     if not job:
-        return "Job select karo", jobs_table()
+        return "Job select karo", queue_cards()
     shutil.rmtree(ROOT / load_config()["paths"]["jobs"] / job, ignore_errors=True)
-    return f"🗑 {job} delete (output folder rakha hai)", jobs_table()
+    return f"🗑 {job} delete (output folder rakha hai)", queue_cards()
 
 
 def load_output(job):
@@ -184,10 +210,16 @@ def voice_preview(choice):
 
 def do_update():
     from docforge.updater import restart_soon, update
+    old = V.current()["label"]
     changed, log = update()
     if changed:
         restart_soon()
-    return f"```\n{log}\n```" + ("\n\n**Page 5 second baad refresh kar lena.**" if changed else "")
+        new = V.current()["label"]
+        items = [l.lstrip("• ") for l in log.splitlines() if l.startswith("• ")]
+        return T.toast_html(f"Updated {old} → {new} · tool restart ho raha hai, 5 sec baad page refresh karo", items)
+    if "latest" in log:
+        return T.toast_html(f"{old} — tool pehle se latest hai ✓")
+    return f"```\n{log}\n```"
 
 
 # settings
@@ -296,14 +328,18 @@ def doctor_text():
 
 # ------------------------------------------------------------------ UI
 cfg = load_config()
-THEME = gr.themes.Base(primary_hue="red", neutral_hue="zinc")
+THEME = gr.themes.Base(primary_hue="blue", neutral_hue="slate", font=[gr.themes.GoogleFont("Inter"), gr.themes.Font("system-ui"), gr.themes.Font("sans-serif")])
 GR6 = int(gr.__version__.split(".")[0]) >= 6
 STYLE = {"css": CSS, "theme": THEME}
 with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
-    with gr.Row():
-        gr.Markdown("# 🎬 Celeb Tool YT\nDark documentary pipeline · master prompt locked · DeepSeek + AI33 Pro + FFmpeg", elem_id="title")
-        upd = gr.Button("⬆ Update tool", scale=0, size="sm")
-    upd_msg = gr.Markdown()
+    _ver = V.current()
+    with gr.Row(elem_id="ice-head"):
+        gr.HTML(T.brand_html(), elem_classes=["ice-plain"], scale=3)
+        with gr.Row(elem_id="ice-actions", scale=2):
+            ver_chip = gr.HTML(T.chip_html(_ver), elem_classes=["ice-plain"])
+            theme_btn = gr.Button("☾ Dark", elem_id="ice-theme", variant="secondary", size="sm", scale=0)
+            upd = gr.Button(f"⟳  {_ver['label']}", elem_id="ice-update", size="sm", scale=0)
+    upd_msg = gr.HTML(elem_classes=["ice-plain"])
 
     with gr.Tab("➕ New Job"):
         name = gr.Textbox(label="Job name (optional)", placeholder="jaise: drake-vs-kendrick")
@@ -338,8 +374,7 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
         add_msg = gr.Markdown()
 
     with gr.Tab("⏳ Queue"):
-        gr.Markdown("Stages: " + " → ".join(STAGE_LABELS))
-        grid = gr.Dataframe(headers=["Job", "Status", "Stages", "Error"], value=jobs_table, interactive=False, wrap=True)
+        grid = gr.HTML(queue_cards)
         with gr.Row():
             qvoice = gr.Dropdown(choices=[], label="Voice override (optional)", allow_custom_value=True)
             qref = gr.Button("↻ Voices", scale=0)
@@ -479,6 +514,10 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
     s_vq.submit(voice_search, [s_vq, s_src], [s_voice, s_vcount])
     s_voice.change(voice_preview, s_voice, s_prev)
     upd.click(do_update, None, upd_msg)
+    theme_btn.click(None, None, None, js=T.TOGGLE_JS)
+    ui.load(None, None, None, js=T.THEME_JS)
+    ui.load(startup_toast, None, upd_msg)
+    ui.load(update_state, None, upd)
     from docforge import styles as _st
     st_go.click(style_analyze, [st_l1, st_l2, st_l3, st_f, st_name], st_msg)
     st_ref.click(lambda: gr.Dropdown(choices=_st.list_styles(), value=_st.locked() or None), None, st_pick)
@@ -502,7 +541,7 @@ with gr.Blocks(title="Celeb Tool YT", **({} if GR6 else STYLE)) as ui:
     m_clr.click(music_clear, None, m_tbl)
     doc_btn.click(doctor_text, None, doc_out)
     timer = gr.Timer(3)
-    timer.tick(lambda: (jobs_table(), tail(), gr.Dropdown(choices=job_names()), style_log()), None, [grid, log, rjob, st_log])
+    timer.tick(lambda: (queue_cards(), tail(), gr.Dropdown(choices=job_names()), style_log()), None, [grid, log, rjob, st_log])
 
 if __name__ == "__main__":
     ui.launch(server_name="127.0.0.1", server_port=7860, inbrowser=True, allowed_paths=[str(ROOT / "output")],

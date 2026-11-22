@@ -33,7 +33,10 @@ def update():
         uv = shutil.which("uv") or "/opt/homebrew/bin/uv"
         code, out = _run([uv, "pip", "install", "--python", sys.executable, "-r", "requirements.txt"])
         log.append("$ uv pip install -r requirements.txt\n" + out[-1500:])
-    log.append("✔ Update ho gaya. Tool restart ho raha hai…")
+    from .version import changelog, label
+    _, n = _run(["git", "rev-list", "--count", "HEAD"])
+    log.append(f"✔ Updated to {label(int(n or 0))}. Tool restart ho raha hai…")
+    log += ["", "Kya naya hai:"] + [f"• {c.splitlines()[0][:110]}" for c in changelog(before, after)]
     return True, "\n".join(log)
 
 
